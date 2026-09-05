@@ -45,18 +45,15 @@ impl UpdateAction {
     pub fn command_args(self) -> (&'static str, Vec<String>) {
         let npm_package = codex_install_context::npm_package_name();
         match self {
-            UpdateAction::NpmGlobalLatest => (
-                "npm",
-                vec!["install".into(), "-g".into(), npm_package],
-            ),
-            UpdateAction::BunGlobalLatest => (
-                "bun",
-                vec!["install".into(), "-g".into(), npm_package],
-            ),
-            UpdateAction::VitePlusGlobalLatest => (
-                "vp",
-                vec!["install".into(), "-g".into(), npm_package],
-            ),
+            UpdateAction::NpmGlobalLatest => {
+                ("npm", vec!["install".into(), "-g".into(), npm_package])
+            }
+            UpdateAction::BunGlobalLatest => {
+                ("bun", vec!["install".into(), "-g".into(), npm_package])
+            }
+            UpdateAction::VitePlusGlobalLatest => {
+                ("vp", vec!["install".into(), "-g".into(), npm_package])
+            }
             UpdateAction::PnpmGlobalLatest => {
                 ("pnpm", vec!["add".into(), "-g".into(), npm_package])
             }

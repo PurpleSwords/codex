@@ -126,11 +126,12 @@ impl App {
             return;
         }
 
-        self.app_event_tx.send(AppEvent::RevertSessionForPromptEdit {
-            thread_id: selection.thread_id,
-            nth_user_message: selection.nth_user_message,
-            prompt: selection.prompt,
-        });
+        self.app_event_tx
+            .send(AppEvent::RevertSessionForPromptEdit {
+                thread_id: selection.thread_id,
+                nth_user_message: selection.nth_user_message,
+                prompt: selection.prompt,
+            });
     }
 
     pub(crate) fn restore_backtrack_prompt_after_revert_error(
@@ -894,12 +895,8 @@ mod tests {
         let mut selected_prompt = prompt("use $skill @sample $google-calendar");
 
         assert_eq!(
-            backtrack_before_turn_id(
-                &turns,
-                /*nth_user_message*/ 1,
-                &mut selected_prompt,
-            )
-            .expect("the selected prompt should resolve"),
+            backtrack_before_turn_id(&turns, /*nth_user_message*/ 1, &mut selected_prompt,)
+                .expect("the selected prompt should resolve"),
             "turn-2"
         );
         assert_eq!(

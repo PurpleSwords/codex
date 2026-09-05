@@ -7530,9 +7530,11 @@ async fn prompt_edit_reverts_before_selected_prompt_in_place() -> Result<()> {
             .iter()
             .any(|line| line.contains("Thread forked from"))
     );
-    assert!(!history.iter().any(|line| {
-        line == "• You’re continuing from this point in a new conversation"
-    }));
+    assert!(
+        !history.iter().any(|line| {
+            line == "• You’re continuing from this point in a new conversation"
+        })
+    );
     app_server.shutdown().await?;
 
     Ok(())
@@ -7604,9 +7606,11 @@ async fn prompt_edit_before_first_prompt_reverts_thread_in_place() -> Result<()>
             .iter()
             .any(|line| line.contains("Thread forked from"))
     );
-    assert!(!history.iter().any(|line| {
-        line == "• You’re continuing from this point in a new conversation"
-    }));
+    assert!(
+        !history.iter().any(|line| {
+            line == "• You’re continuing from this point in a new conversation"
+        })
+    );
     app_server.shutdown().await?;
 
     Ok(())

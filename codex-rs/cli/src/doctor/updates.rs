@@ -422,11 +422,9 @@ async fn fetch_latest_github_release_version(
         tag_name: String,
     }
 
-    let info = http_get_json::<ReleaseInfo>(
-        client,
-        &codex_install_context::github_latest_release_url(),
-    )
-    .await?;
+    let info =
+        http_get_json::<ReleaseInfo>(client, &codex_install_context::github_latest_release_url())
+            .await?;
     info.tag_name
         .strip_prefix("rust-v")
         .or_else(|| info.tag_name.strip_prefix("fork-v"))

@@ -62,11 +62,7 @@ pub fn npm_registry_package_url() -> String {
     )
 }
 
-fn environment_override(
-    variable: &str,
-    default: &str,
-    is_valid: impl Fn(&str) -> bool,
-) -> String {
+fn environment_override(variable: &str, default: &str, is_valid: impl Fn(&str) -> bool) -> String {
     std::env::var(variable)
         .ok()
         .filter(|value| is_valid(value))
@@ -990,6 +986,8 @@ mod tests {
 
         assert!(is_valid_github_repository("PurpleSwords/codex"));
         assert!(!is_valid_github_repository("PurpleSwords/codex/releases"));
-        assert!(!is_valid_github_repository("https://github.com/openai/codex"));
+        assert!(!is_valid_github_repository(
+            "https://github.com/openai/codex"
+        ));
     }
 }
