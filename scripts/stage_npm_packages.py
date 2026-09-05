@@ -554,9 +554,7 @@ def main() -> int:
                         f"Artifact directory not found: {artifacts_temp_root}"
                     )
                 workflow_url = None
-                print(
-                    f"Using native artifacts from {artifacts_temp_root}", flush=True
-                )
+                print(f"Using native artifacts from {artifacts_temp_root}", flush=True)
             else:
                 workflow_url, resolved_head_sha = resolve_workflow_url(
                     args.release_version, args.workflow_url

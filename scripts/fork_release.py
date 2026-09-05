@@ -10,9 +10,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = REPO_ROOT / "fork-release.json"
 WORKSPACE_MANIFEST = REPO_ROOT / "codex-rs" / "Cargo.toml"
-VERSION_PATTERN = re.compile(
-    r"(?:[1-9][0-9]{3})\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
-)
+VERSION_PATTERN = re.compile(r"(?:[1-9][0-9]{3})\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)")
 
 
 def parse_args() -> argparse.Namespace:
@@ -22,7 +20,9 @@ def parse_args() -> argparse.Namespace:
     config = subparsers.add_parser("config", help="Print one release config value.")
     config.add_argument("field")
 
-    validate = subparsers.add_parser("validate-version", help="Validate a release version.")
+    validate = subparsers.add_parser(
+        "validate-version", help="Validate a release version."
+    )
     validate.add_argument("version")
 
     set_version = subparsers.add_parser(
