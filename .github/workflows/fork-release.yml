@@ -1,0 +1,321 @@
+name: fork-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Calendar version in YYYY.M.D form
+        required: true
+        type: string
+      create_github_release:
+        description: Create a GitHub release after building
+        required: true
+        default: true
+        type: boolean
+      publish_npm:
+        description: Publish to npm after building (requires trusted publishing)
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+env:
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+  CARGO_TARGET_DIR: ${{ github.workspace }}/codex-rs/target
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      npm_package: ${{ steps.release.outputs.npm_package }}
+      repository_url: ${{ steps.release.outputs.repository_url }}
+      description: ${{ steps.release.outputs.description }}
+      readme: ${{ steps.release.outputs.readme }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - id: release
+        name: Validate release metadata
+        env:
+          VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(python3 scripts/fork_release.py validate-version "$VERSION")"
+          configured_repository="$(python3 scripts/fork_release.py config githubRepository)"
+          if [[ "$configured_repository" != "$GITHUB_REPOSITORY" ]]; then
+            echo "fork-release.json targets $configured_repository, not $GITHUB_REPOSITORY" >&2
+            exit 1
+          fi
+          {
+            echo "version=$version"
+            echo "npm_package=$(python3 scripts/fork_release.py config npmPackage)"
+            echo "repository_url=$(python3 scripts/fork_release.py config repositoryUrl)"
+            echo "description=$(python3 scripts/fork_release.py config description)"
+            echo "readme=$(python3 scripts/fork_release.py config readme)"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: prepare
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+          - runner: macos-15
+            target: aarch64-apple-darwin
+          - runner: windows-2025
+            target: x86_64-pc-windows-msvc
+          - runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+      - if: runner.os == 'Windows'
+        name: Configure Windows build paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config --global core.longpaths true
+          target_dir="$RUNNER_TEMP/codex-target"
+          mkdir -p "$target_dir"
+          echo "CARGO_TARGET_DIR=$target_dir" >> "$GITHUB_ENV"
+      - name: Set release version
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: python3 scripts/fork_release.py set-version "$VERSION"
+      - if: runner.os == 'Linux'
+        name: Install Linux build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -y
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends binutils pkg-config libcap-dev
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+        with:
+          targets: ${{ matrix.target }}
+      - if: runner.os == 'Linux'
+        name: Use hermetic Cargo home
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo_home="${GITHUB_WORKSPACE}/.cargo-home"
+          mkdir -p "${cargo_home}/bin"
+          echo "CARGO_HOME=${cargo_home}" >> "$GITHUB_ENV"
+          echo "${cargo_home}/bin" >> "$GITHUB_PATH"
+          : > "${cargo_home}/config.toml"
+      - if: runner.os == 'Linux'
+        name: Install Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.14.0
+          use-cache: false
+      - if: runner.os == 'Linux'
+        name: Install musl build tools
+        working-directory: codex-rs
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: bash "${GITHUB_WORKSPACE}/.github/scripts/install-musl-build-tools.sh"
+      - if: runner.os == 'Linux'
+        name: Disable aws-lc jitter entropy
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "AWS_LC_SYS_NO_JITTER_ENTROPY=1" >> "$GITHUB_ENV"
+          target_no_jitter="AWS_LC_SYS_NO_JITTER_ENTROPY_${{ matrix.target }}"
+          target_no_jitter="${target_no_jitter//-/_}"
+          echo "${target_no_jitter}=1" >> "$GITHUB_ENV"
+      - name: Configure rusty_v8 artifacts
+        uses: ./.github/actions/setup-rusty-v8
+        with:
+          target: ${{ matrix.target }}
+      - if: runner.os == 'Windows'
+        name: Configure LLVM linker
+        uses: ./.github/actions/setup-msvc-env
+        with:
+          target: ${{ matrix.target }}
+      - if: runner.os == 'Linux'
+        name: Build bwrap and export digest
+        working-directory: codex-rs
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="${{ matrix.target }}"
+          cargo build --target "$target" --release --bin bwrap
+          bwrap_path="$CARGO_TARGET_DIR/$target/release/bwrap"
+          strip --strip-debug --strip-unneeded "$bwrap_path"
+          digest="$(sha256sum "$bwrap_path" | awk '{print $1}')"
+          echo "CODEX_BWRAP_SHA256=$digest" >> "$GITHUB_ENV"
+      - name: Build Codex package binaries
+        working-directory: codex-rs
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="${{ matrix.target }}"
+          build_args=(--bin codex --bin codex-code-mode-host)
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            build_args+=(--bin codex-command-runner --bin codex-windows-sandbox-setup)
+            if [[ "$target" == "x86_64-pc-windows-msvc" ]]; then
+              export LIBSQLITE3_FLAGS=SQLITE_DISABLE_INTRINSIC
+            fi
+          fi
+          cargo build --target "$target" --release "${build_args[@]}"
+      - name: Build native package archive
+        working-directory: codex-rs
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="${{ matrix.target }}"
+          bash "${GITHUB_WORKSPACE}/.github/scripts/build-codex-package-archive.sh" \
+            --target "$target" \
+            --bundle primary \
+            --entrypoint-dir "$CARGO_TARGET_DIR/$target/release" \
+            --archive-dir "dist/$target"
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: ${{ matrix.target }}
+          path: codex-rs/dist/${{ matrix.target }}/codex-package-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+
+  package-npm:
+    needs:
+      - prepare
+      - build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: "*-*-*"
+          path: artifacts
+      - name: Build npm tarballs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/stage_npm_packages.py \
+            --release-version '${{ needs.prepare.outputs.version }}' \
+            --package codex \
+            --artifacts-dir artifacts \
+            --local-artifacts-only \
+            --output-dir dist/npm \
+            --npm-name '${{ needs.prepare.outputs.npm_package }}' \
+            --repository-url '${{ needs.prepare.outputs.repository_url }}' \
+            --description '${{ needs.prepare.outputs.description }}' \
+            --readme '${{ needs.prepare.outputs.readme }}'
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: npm-dist
+          path: dist/npm/*.tgz
+          if-no-files-found: error
+
+  github-release:
+    if: inputs.create_github_release
+    needs:
+      - prepare
+      - build
+      - package-npm
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: "*-*-*"
+          path: native
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: npm-dist
+          path: npm
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "fork-v${VERSION}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "GitHub release fork-v${VERSION} already exists" >&2
+            exit 1
+          fi
+          mapfile -d '' assets < <(find native npm -type f -print0)
+          gh release create "fork-v${VERSION}" "${assets[@]}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Community Codex ${VERSION}" \
+            --notes "Unsigned community build from ${GITHUB_SHA}. See FORK.md in the repository for scope, cadence, and attribution."
+
+  publish-npm:
+    if: inputs.publish_npm
+    needs:
+      - prepare
+      - package-npm
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: npm-dist
+          path: npm
+      - name: Publish platform packages, then root package
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          NPM_PACKAGE: ${{ needs.prepare.outputs.npm_package }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for package_version in \
+            "${VERSION}-linux-x64" \
+            "${VERSION}-linux-arm64" \
+            "${VERSION}-darwin-x64" \
+            "${VERSION}-darwin-arm64" \
+            "${VERSION}-win32-x64" \
+            "${VERSION}-win32-arm64" \
+            "$VERSION"; do
+            if npm view "${NPM_PACKAGE}@${package_version}" version >/dev/null 2>&1; then
+              echo "npm version ${NPM_PACKAGE}@${package_version} already exists" >&2
+              exit 1
+            fi
+          done
+          for platform in linux-x64 linux-arm64 darwin-x64 darwin-arm64 win32-x64 win32-arm64; do
+            npm publish "npm/codex-npm-${platform}-${VERSION}.tgz" \
+              --access public \
+              --tag "$platform" \
+              --provenance
+          done
+          npm publish "npm/codex-npm-${VERSION}.tgz" \
+            --access public \
+            --tag latest \
+            --provenance

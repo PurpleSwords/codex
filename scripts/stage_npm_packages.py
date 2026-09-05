@@ -19,7 +19,7 @@ from typing import Sequence
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BUILD_SCRIPT = REPO_ROOT / "codex-cli" / "scripts" / "build_npm_package.py"
 WORKFLOW_NAME = ".github/workflows/rust-release.yml"
-GITHUB_REPO = "openai/codex"
+GITHUB_REPO = os.environ.get("GITHUB_REPOSITORY", "openai/codex")
 BINARY_TARGETS = (
     "x86_64-unknown-linux-musl",
     "aarch64-unknown-linux-musl",
@@ -104,7 +104,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--artifacts-dir",
         type=Path,
-        help="Directory containing previously downloaded workflow artifacts.",
+        help="Directory used to cache or read downloaded workflow artifacts.",
+    )
+    parser.add_argument(
+        "--local-artifacts-only",
+        action="store_true",
+        help="Use --artifacts-dir without querying or downloading workflow artifacts.",
     )
     parser.add_argument(
         "--output-dir",
@@ -116,6 +121,23 @@ def parse_args() -> argparse.Namespace:
         "--keep-staging-dirs",
         action="store_true",
         help="Retain temporary staging directories instead of deleting them.",
+    )
+    parser.add_argument(
+        "--npm-name",
+        help="Optional npm package name override for Codex and its platform aliases.",
+    )
+    parser.add_argument(
+        "--repository-url",
+        help="Optional git repository URL to write to Codex package metadata.",
+    )
+    parser.add_argument(
+        "--description",
+        help="Optional description to write to Codex package metadata.",
+    )
+    parser.add_argument(
+        "--readme",
+        type=Path,
+        help="Optional README to include in Codex packages.",
     )
     return parser.parse_args()
 
@@ -213,6 +235,20 @@ def install_from_workflow_artifacts(
 ) -> None:
     artifacts = select_target_artifacts(workflow_id, components)
     download_artifacts(workflow_id, artifacts_dir, artifacts)
+    if CODEX_PACKAGE_COMPONENT in components:
+        install_codex_package_archives(artifacts_dir, vendor_dir, BINARY_TARGETS)
+    install_binary_components(
+        artifacts_dir,
+        vendor_dir,
+        [BINARY_COMPONENTS[name] for name in components if name in BINARY_COMPONENTS],
+    )
+
+
+def install_from_local_artifacts(
+    artifacts_dir: Path,
+    components: Sequence[str],
+    vendor_dir: Path,
+) -> None:
     if CODEX_PACKAGE_COMPONENT in components:
         install_codex_package_archives(artifacts_dir, vendor_dir, BINARY_TARGETS)
     install_binary_components(
@@ -481,6 +517,9 @@ def tarball_name_for_package(package: str, version: str) -> str:
 def main() -> int:
     args = parse_args()
 
+    if args.local_artifacts_only and args.artifacts_dir is None:
+        raise RuntimeError("--local-artifacts-only requires --artifacts-dir.")
+
     output_dir = args.output_dir or (REPO_ROOT / "dist" / "npm")
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -507,18 +546,32 @@ def main() -> int:
 
     try:
         if native_component_sets:
-            workflow_url, resolved_head_sha = resolve_workflow_url(
-                args.release_version, args.workflow_url
-            )
-            print(f"Using native artifacts from {workflow_url}", flush=True)
-            if args.artifacts_dir is not None:
+            if args.local_artifacts_only:
+                assert args.artifacts_dir is not None
                 artifacts_temp_root = args.artifacts_dir.resolve()
-                artifacts_temp_root.mkdir(parents=True, exist_ok=True)
-            else:
-                artifacts_temp_root = Path(
-                    tempfile.mkdtemp(prefix="npm-native-artifacts-", dir=runner_temp)
+                if not artifacts_temp_root.is_dir():
+                    raise RuntimeError(
+                        f"Artifact directory not found: {artifacts_temp_root}"
+                    )
+                workflow_url = None
+                print(
+                    f"Using native artifacts from {artifacts_temp_root}", flush=True
                 )
-                remove_artifacts_temp_root = True
+            else:
+                workflow_url, resolved_head_sha = resolve_workflow_url(
+                    args.release_version, args.workflow_url
+                )
+                print(f"Using native artifacts from {workflow_url}", flush=True)
+                if args.artifacts_dir is not None:
+                    artifacts_temp_root = args.artifacts_dir.resolve()
+                    artifacts_temp_root.mkdir(parents=True, exist_ok=True)
+                else:
+                    artifacts_temp_root = Path(
+                        tempfile.mkdtemp(
+                            prefix="npm-native-artifacts-", dir=runner_temp
+                        )
+                    )
+                    remove_artifacts_temp_root = True
             print(f"Using artifact cache at {artifacts_temp_root}", flush=True)
             for components in native_component_sets:
                 vendor_temp_root = Path(
@@ -531,12 +584,19 @@ def main() -> int:
                     + f" into {vendor_temp_root}",
                     flush=True,
                 )
-                install_native_components(
-                    workflow_url,
-                    set(components),
-                    vendor_temp_root,
-                    artifacts_temp_root,
-                )
+                if workflow_url is None:
+                    install_from_local_artifacts(
+                        artifacts_temp_root,
+                        components,
+                        vendor_temp_root / "vendor",
+                    )
+                else:
+                    install_native_components(
+                        workflow_url,
+                        set(components),
+                        vendor_temp_root,
+                        artifacts_temp_root,
+                    )
                 vendor_src_by_components[components] = vendor_temp_root / "vendor"
 
         if resolved_head_sha:
@@ -568,6 +628,15 @@ def main() -> int:
             )
             if vendor_src is not None:
                 cmd.extend(["--vendor-src", str(vendor_src)])
+
+            for option, value in [
+                ("--npm-name", args.npm_name),
+                ("--repository-url", args.repository_url),
+                ("--description", args.description),
+                ("--readme", str(args.readme.resolve()) if args.readme else None),
+            ]:
+                if value is not None:
+                    cmd.extend([option, value])
 
             staging_jobs.append(
                 (staging_dir, cmd, f"Staged {package} at {pack_output}")

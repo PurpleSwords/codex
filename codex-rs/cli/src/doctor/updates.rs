@@ -33,7 +33,6 @@ use super::network;
 const MAX_VERSION_RESPONSE_BYTES: usize = 1024 * 1024;
 
 const VERSION_FILE_NAME: &str = "version.json";
-const GITHUB_LATEST_RELEASE_URL: &str = "https://api.github.com/repos/openai/codex/releases/latest";
 const HOMEBREW_CASK_API_URL: &str = "https://formulae.brew.sh/api/cask/codex.json";
 #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
 const DESKTOP_UPDATE_URL: &str = "https://persistent.oaistatic.com/codex-app-prod/appcast-x64.xml";
@@ -387,15 +386,16 @@ fn push_cached_version_details(details: &mut Vec<String>, version_file: &Path) {
     }
 }
 
-fn update_action_label(context: &InstallContext) -> &'static str {
+fn update_action_label(context: &InstallContext) -> String {
+    let npm_package = codex_install_context::npm_package_name();
     match &context.method {
-        InstallMethod::Npm => "npm install -g @openai/codex",
-        InstallMethod::Bun => "bun install -g @openai/codex",
-        InstallMethod::VitePlus => "vp install -g @openai/codex",
-        InstallMethod::Pnpm => "pnpm add -g @openai/codex",
-        InstallMethod::Brew => "brew upgrade --cask codex",
-        InstallMethod::Standalone { .. } => "standalone installer",
-        InstallMethod::Other => "manual or unknown",
+        InstallMethod::Npm => format!("npm install -g {npm_package}"),
+        InstallMethod::Bun => format!("bun install -g {npm_package}"),
+        InstallMethod::VitePlus => format!("vp install -g {npm_package}"),
+        InstallMethod::Pnpm => format!("pnpm add -g {npm_package}"),
+        InstallMethod::Brew => "brew upgrade --cask codex".to_string(),
+        InstallMethod::Standalone { .. } => "standalone installer".to_string(),
+        InstallMethod::Other => "manual or unknown".to_string(),
     }
 }
 
@@ -422,9 +422,14 @@ async fn fetch_latest_github_release_version(
         tag_name: String,
     }
 
-    let info = http_get_json::<ReleaseInfo>(client, GITHUB_LATEST_RELEASE_URL).await?;
+    let info = http_get_json::<ReleaseInfo>(
+        client,
+        &codex_install_context::github_latest_release_url(),
+    )
+    .await?;
     info.tag_name
         .strip_prefix("rust-v")
+        .or_else(|| info.tag_name.strip_prefix("fork-v"))
         .map(str::to_string)
         .ok_or_else(|| format!("failed to parse latest tag {}", info.tag_name))
 }

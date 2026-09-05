@@ -1,0 +1,7 @@
+{
+  "npmPackage": "@purplesword/codex",
+  "githubRepository": "PurpleSwords/codex",
+  "repositoryUrl": "git+https://github.com/PurpleSwords/codex.git",
+  "description": "Community-maintained fork of OpenAI Codex CLI with selected fixes and model updates.",
+  "readme": "codex-cli/README.fork.md"
+}

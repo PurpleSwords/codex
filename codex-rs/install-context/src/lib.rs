@@ -8,6 +8,8 @@ use semver::Version;
 use serde::Deserialize;
 
 const BIN_DIRNAME: &str = "bin";
+const DEFAULT_GITHUB_REPOSITORY: &str = "openai/codex";
+const DEFAULT_NPM_PACKAGE_NAME: &str = "@openai/codex";
 const CODE_MODE_HOST_EXECUTABLE_NAME: &str = if cfg!(windows) {
     "codex-code-mode-host.exe"
 } else {
@@ -20,6 +22,87 @@ const RESOURCES_DIRNAME: &str = "codex-resources";
 const STANDALONE_PACKAGES_DIRNAME: &str = "standalone";
 const ZSH_DIRNAME: &str = "zsh";
 static INSTALL_CONTEXT: OnceLock<InstallContext> = OnceLock::new();
+
+pub fn github_latest_release_url() -> String {
+    format!("{}/releases/latest", github_repository_api_url())
+}
+
+pub fn github_releases_url() -> String {
+    format!("{}/releases/latest", github_repository_url())
+}
+
+pub fn github_repository_url() -> String {
+    format!("https://github.com/{}", github_repository())
+}
+
+pub fn github_repository() -> String {
+    environment_override(
+        "CODEX_GITHUB_REPOSITORY",
+        DEFAULT_GITHUB_REPOSITORY,
+        is_valid_github_repository,
+    )
+}
+
+fn github_repository_api_url() -> String {
+    format!("https://api.github.com/repos/{}", github_repository())
+}
+
+pub fn npm_package_name() -> String {
+    environment_override(
+        "CODEX_NPM_PACKAGE_NAME",
+        DEFAULT_NPM_PACKAGE_NAME,
+        is_valid_npm_package_name,
+    )
+}
+
+pub fn npm_registry_package_url() -> String {
+    format!(
+        "https://registry.npmjs.org/{}",
+        npm_package_name().replace('/', "%2f")
+    )
+}
+
+fn environment_override(
+    variable: &str,
+    default: &str,
+    is_valid: impl Fn(&str) -> bool,
+) -> String {
+    std::env::var(variable)
+        .ok()
+        .filter(|value| is_valid(value))
+        .unwrap_or_else(|| default.to_string())
+}
+
+fn is_valid_github_repository(value: &str) -> bool {
+    let Some((owner, repository)) = value.split_once('/') else {
+        return false;
+    };
+    !owner.is_empty()
+        && !repository.is_empty()
+        && !repository.contains('/')
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'/'))
+}
+
+fn is_valid_npm_package_name(value: &str) -> bool {
+    let valid_characters = value.bytes().all(|byte| {
+        byte.is_ascii_lowercase()
+            || byte.is_ascii_digit()
+            || matches!(byte, b'@' | b'/' | b'-' | b'_' | b'.')
+    });
+    if !valid_characters {
+        return false;
+    }
+    if let Some(scoped_name) = value.strip_prefix('@') {
+        let Some((scope, package)) = scoped_name.split_once('/') else {
+            return false;
+        };
+        !scope.is_empty() && !package.is_empty() && !package.contains('/')
+    } else {
+        !value.is_empty() && !value.contains('/')
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum StandalonePlatform {
@@ -896,5 +979,17 @@ mod tests {
                 package_layout: None,
             }
         );
+    }
+
+    #[test]
+    fn release_metadata_overrides_are_validated() {
+        assert!(is_valid_npm_package_name("@purplesword/codex"));
+        assert!(is_valid_npm_package_name("codex-community"));
+        assert!(!is_valid_npm_package_name("@purplesword"));
+        assert!(!is_valid_npm_package_name("Codex Community"));
+
+        assert!(is_valid_github_repository("PurpleSwords/codex"));
+        assert!(!is_valid_github_repository("PurpleSwords/codex/releases"));
+        assert!(!is_valid_github_repository("https://github.com/openai/codex"));
     }
 }

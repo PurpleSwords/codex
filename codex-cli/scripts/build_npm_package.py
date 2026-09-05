@@ -4,6 +4,7 @@
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -17,47 +18,42 @@ RESPONSES_API_PROXY_NPM_ROOT = REPO_ROOT / "codex-rs" / "responses-api-proxy" / 
 CODEX_SDK_ROOT = REPO_ROOT / "sdk" / "typescript"
 CODEX_NPM_NAME = "@openai/codex"
 CODEX_PACKAGE_COMPONENT = "codex-package"
+NPM_NAME_PATTERN = re.compile(
+    r"(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*"
+)
 
-# `npm_name` is the local optional-dependency alias consumed by `bin/codex.js`.
-# The underlying package published to npm is always `@openai/codex`.
 CODEX_PLATFORM_PACKAGES: dict[str, dict[str, str]] = {
     "codex-linux-x64": {
-        "npm_name": "@openai/codex-linux-x64",
         "npm_tag": "linux-x64",
         "target_triple": "x86_64-unknown-linux-musl",
         "os": "linux",
         "cpu": "x64",
     },
     "codex-linux-arm64": {
-        "npm_name": "@openai/codex-linux-arm64",
         "npm_tag": "linux-arm64",
         "target_triple": "aarch64-unknown-linux-musl",
         "os": "linux",
         "cpu": "arm64",
     },
     "codex-darwin-x64": {
-        "npm_name": "@openai/codex-darwin-x64",
         "npm_tag": "darwin-x64",
         "target_triple": "x86_64-apple-darwin",
         "os": "darwin",
         "cpu": "x64",
     },
     "codex-darwin-arm64": {
-        "npm_name": "@openai/codex-darwin-arm64",
         "npm_tag": "darwin-arm64",
         "target_triple": "aarch64-apple-darwin",
         "os": "darwin",
         "cpu": "arm64",
     },
     "codex-win32-x64": {
-        "npm_name": "@openai/codex-win32-x64",
         "npm_tag": "win32-x64",
         "target_triple": "x86_64-pc-windows-msvc",
         "os": "win32",
         "cpu": "x64",
     },
     "codex-win32-arm64": {
-        "npm_name": "@openai/codex-win32-arm64",
         "npm_tag": "win32-arm64",
         "target_triple": "aarch64-pc-windows-msvc",
         "os": "win32",
@@ -131,6 +127,24 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help="Directory containing pre-installed native binaries to bundle (vendor root).",
     )
+    parser.add_argument(
+        "--npm-name",
+        default=CODEX_NPM_NAME,
+        help=f"npm package name for Codex and its platform aliases (default: {CODEX_NPM_NAME}).",
+    )
+    parser.add_argument(
+        "--repository-url",
+        help="Optional git repository URL to write to Codex package metadata.",
+    )
+    parser.add_argument(
+        "--description",
+        help="Optional description to write to Codex package metadata.",
+    )
+    parser.add_argument(
+        "--readme",
+        type=Path,
+        help="Optional README to include instead of the repository README.",
+    )
     return parser.parse_args()
 
 
@@ -150,10 +164,27 @@ def main() -> int:
     if not version:
         raise RuntimeError("Must specify --version or --release-version.")
 
+    npm_name = args.npm_name.strip()
+    if NPM_NAME_PATTERN.fullmatch(npm_name) is None:
+        raise RuntimeError(f"Invalid npm package name: {npm_name}")
+    if npm_name != CODEX_NPM_NAME and not args.repository_url:
+        raise RuntimeError("Custom --npm-name requires --repository-url.")
+    readme = args.readme.resolve() if args.readme else None
+    if readme is not None and not readme.is_file():
+        raise RuntimeError(f"README not found: {readme}")
+
     staging_dir, created_temp = prepare_staging_dir(args.staging_dir)
 
     try:
-        stage_sources(staging_dir, version, package)
+        stage_sources(
+            staging_dir,
+            version,
+            package,
+            npm_name=npm_name,
+            repository_url=args.repository_url,
+            description=args.description,
+            readme=readme,
+        )
 
         vendor_src = args.vendor_src.resolve() if args.vendor_src else None
         native_components = PACKAGE_NATIVE_COMPONENTS.get(package, [])
@@ -229,7 +260,16 @@ def prepare_staging_dir(staging_dir: Path | None) -> tuple[Path, bool]:
     return temp_dir, True
 
 
-def stage_sources(staging_dir: Path, version: str, package: str) -> None:
+def stage_sources(
+    staging_dir: Path,
+    version: str,
+    package: str,
+    *,
+    npm_name: str,
+    repository_url: str | None,
+    description: str | None,
+    readme: Path | None,
+) -> None:
     package_json: dict
     package_json_path: Path | None = None
 
@@ -238,9 +278,7 @@ def stage_sources(staging_dir: Path, version: str, package: str) -> None:
         bin_dir.mkdir(parents=True, exist_ok=True)
         shutil.copy2(CODEX_CLI_ROOT / "bin" / "codex.js", bin_dir / "codex.js")
 
-        readme_src = REPO_ROOT / "README.md"
-        if readme_src.exists():
-            shutil.copy2(readme_src, staging_dir / "README.md")
+        copy_release_documents(staging_dir, readme)
 
         package_json_path = CODEX_CLI_ROOT / "package.json"
     elif package in CODEX_PLATFORM_PACKAGES:
@@ -248,21 +286,21 @@ def stage_sources(staging_dir: Path, version: str, package: str) -> None:
         platform_npm_tag = platform_package["npm_tag"]
         platform_version = compute_platform_package_version(version, platform_npm_tag)
 
-        readme_src = REPO_ROOT / "README.md"
-        if readme_src.exists():
-            shutil.copy2(readme_src, staging_dir / "README.md")
+        copy_release_documents(staging_dir, readme)
 
         with open(CODEX_CLI_ROOT / "package.json", "r", encoding="utf-8") as fh:
             codex_package_json = json.load(fh)
 
         package_json = {
-            "name": CODEX_NPM_NAME,
+            "name": npm_name,
             "version": platform_version,
             "license": codex_package_json.get("license", "Apache-2.0"),
             "os": [platform_package["os"]],
             "cpu": [platform_package["cpu"]],
-            "files": ["vendor"],
-            "repository": codex_package_json.get("repository"),
+            "files": ["vendor", "LICENSE", "NOTICE"],
+            "repository": repository_metadata(
+                repository_url, codex_package_json.get("repository")
+            ),
         }
 
         engines = codex_package_json.get("engines")
@@ -297,10 +335,18 @@ def stage_sources(staging_dir: Path, version: str, package: str) -> None:
         package_json["version"] = version
 
     if package == "codex":
-        package_json["files"] = ["bin/codex.js"]
+        package_json["name"] = npm_name
+        package_json["files"] = ["bin/codex.js", "LICENSE", "NOTICE"]
+        package_json["repository"] = repository_metadata(
+            repository_url, package_json.get("repository")
+        )
+        if description:
+            package_json["description"] = description
         package_json["optionalDependencies"] = {
-            CODEX_PLATFORM_PACKAGES[platform_package]["npm_name"]: (
-                f"npm:{CODEX_NPM_NAME}@"
+            platform_package_alias(
+                npm_name, CODEX_PLATFORM_PACKAGES[platform_package]["npm_tag"]
+            ): (
+                f"npm:{npm_name}@"
                 f"{compute_platform_package_version(version, CODEX_PLATFORM_PACKAGES[platform_package]['npm_tag'])}"
             )
             for platform_package in PACKAGE_EXPANSIONS["codex"]
@@ -315,7 +361,7 @@ def stage_sources(staging_dir: Path, version: str, package: str) -> None:
         dependencies = package_json.get("dependencies")
         if not isinstance(dependencies, dict):
             dependencies = {}
-        dependencies[CODEX_NPM_NAME] = version
+        dependencies[npm_name] = version
         package_json["dependencies"] = dependencies
 
     with open(staging_dir / "package.json", "w", encoding="utf-8") as out:
@@ -327,6 +373,30 @@ def compute_platform_package_version(version: str, platform_tag: str) -> str:
     # npm forbids republishing the same package name/version, so each
     # platform-specific tarball needs a unique version string.
     return f"{version}-{platform_tag}"
+
+
+def platform_package_alias(npm_name: str, platform_tag: str) -> str:
+    return f"{npm_name}-{platform_tag}"
+
+
+def repository_metadata(repository_url: str | None, fallback: object) -> object:
+    if repository_url:
+        return {
+            "type": "git",
+            "url": repository_url,
+            "directory": "codex-cli",
+        }
+    return fallback
+
+
+def copy_release_documents(staging_dir: Path, readme: Path | None) -> None:
+    readme_src = readme or (REPO_ROOT / "README.md")
+    if readme_src.exists():
+        shutil.copy2(readme_src, staging_dir / "README.md")
+    for filename in ("LICENSE", "NOTICE"):
+        source = REPO_ROOT / filename
+        if source.exists():
+            shutil.copy2(source, staging_dir / filename)
 
 
 def run_command(cmd: list[str], cwd: Path | None = None) -> None:

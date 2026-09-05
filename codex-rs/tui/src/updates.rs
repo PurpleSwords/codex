@@ -59,8 +59,6 @@ pub fn get_upgrade_version(config: &Config) -> Option<String> {
 
 // We use the latest version from the cask if installation is via homebrew - homebrew does not immediately pick up the latest release and can lag behind.
 const HOMEBREW_CASK_API_URL: &str = "https://formulae.brew.sh/api/cask/codex.json";
-const LATEST_RELEASE_URL: &str = "https://api.github.com/repos/openai/codex/releases/latest";
-
 #[derive(Deserialize, Debug, Clone)]
 struct ReleaseInfo {
     tag_name: String,
@@ -99,7 +97,7 @@ async fn check_for_update(
         | Some(UpdateAction::PnpmGlobalLatest) => {
             let latest_version = fetch_latest_github_release_version(&client_pool).await?;
             let package_info = client_pool
-                .get(npm_registry::PACKAGE_URL)
+                .get(codex_install_context::npm_registry_package_url())
                 .headers(default_headers())
                 .send()
                 .await?
@@ -136,7 +134,7 @@ async fn fetch_latest_github_release_version(
     let ReleaseInfo {
         tag_name: latest_tag_name,
     } = client_pool
-        .get(LATEST_RELEASE_URL)
+        .get(codex_install_context::github_latest_release_url())
         .headers(default_headers())
         .send()
         .await?

@@ -12,14 +12,20 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const require = createRequire(import.meta.url);
 const codexPackageRoot = realpathSync(path.join(__dirname, ".."));
+const codexPackageJson = JSON.parse(
+  readFileSync(path.join(codexPackageRoot, "package.json"), "utf8"),
+);
+const codexNpmName = codexPackageJson.name || "@openai/codex";
+const codexPackagePath = codexNpmName.split("/");
+const codexPackageBasename = codexPackagePath[codexPackagePath.length - 1];
 
 const PLATFORM_PACKAGE_BY_TARGET = {
-  "x86_64-unknown-linux-musl": "@openai/codex-linux-x64",
-  "aarch64-unknown-linux-musl": "@openai/codex-linux-arm64",
-  "x86_64-apple-darwin": "@openai/codex-darwin-x64",
-  "aarch64-apple-darwin": "@openai/codex-darwin-arm64",
-  "x86_64-pc-windows-msvc": "@openai/codex-win32-x64",
-  "aarch64-pc-windows-msvc": "@openai/codex-win32-arm64",
+  "x86_64-unknown-linux-musl": `${codexNpmName}-linux-x64`,
+  "aarch64-unknown-linux-musl": `${codexNpmName}-linux-arm64`,
+  "x86_64-apple-darwin": `${codexNpmName}-darwin-x64`,
+  "aarch64-apple-darwin": `${codexNpmName}-darwin-arm64`,
+  "x86_64-pc-windows-msvc": `${codexNpmName}-win32-x64`,
+  "aarch64-pc-windows-msvc": `${codexNpmName}-win32-arm64`,
 };
 
 const { platform, arch } = process;
@@ -98,12 +104,12 @@ function findCodexExecutable() {
   const packageManager = detectPackageManager();
   const updateCommand =
     packageManager === "bun"
-      ? "bun install -g @openai/codex@latest"
+      ? `bun install -g ${codexNpmName}@latest`
       : packageManager === "pnpm"
-        ? "pnpm add -g @openai/codex@latest"
+        ? `pnpm add -g ${codexNpmName}@latest`
         : packageManager === "vite-plus"
-          ? "vp install -g @openai/codex@latest"
-          : "npm install -g @openai/codex@latest";
+          ? `vp install -g ${codexNpmName}@latest`
+          : `npm install -g ${codexNpmName}@latest`;
   throw new Error(
     `Missing optional dependency ${platformPackage}. Reinstall Codex: ${updateCommand}`,
   );
@@ -124,7 +130,7 @@ function isPnpmOwnedCodexInstall(nodeModulesDir) {
 
   try {
     return (
-      realpathSync(path.join(nodeModulesDir, "@openai", "codex")) ===
+      realpathSync(path.join(nodeModulesDir, ...codexPackagePath)) ===
       codexPackageRoot
     );
   } catch {
@@ -138,25 +144,31 @@ function isVitePlusOwnedCodexInstall(packagesDir) {
   }
 
   try {
-    const metadata = JSON.parse(
-      readFileSync(path.join(packagesDir, "@openai", "codex.json"), "utf8"),
+    const metadataPath = path.join(
+      packagesDir,
+      ...codexPackagePath.slice(0, -1),
+      `${codexPackageBasename}.json`,
     );
-    if (metadata.name !== "@openai/codex") {
+    const metadata = JSON.parse(
+      readFileSync(metadataPath, "utf8"),
+    );
+    if (metadata.name !== codexNpmName) {
       return false;
     }
 
-    // Vite+ records the active global installation in packages/@openai/codex.json.
+    // Vite+ records the active global installation next to the package prefix.
     // Older installs have no ID or append a #-prefixed ID to the package name;
     // newer installs put the ID in a subdirectory of the package prefix.
     const installId = metadata.installId || "";
+    const installPrefix = path.join(packagesDir, ...codexPackagePath);
     const installDir = installId.startsWith("#")
-      ? path.join(packagesDir, `@openai/codex${installId}`)
-      : path.join(packagesDir, "@openai/codex", installId);
+      ? `${installPrefix}${installId}`
+      : path.join(installPrefix, installId);
     for (const nodeModulesDir of [
       path.join(installDir, "lib", "node_modules"),
       path.join(installDir, "node_modules"),
     ]) {
-      const packageRoot = path.join(nodeModulesDir, "@openai", "codex");
+      const packageRoot = path.join(nodeModulesDir, ...codexPackagePath);
       if (
         existsSync(packageRoot) &&
         realpathSync(packageRoot) === codexPackageRoot
@@ -231,7 +243,20 @@ const packageManagerEnvVar =
 const env = {
   ...process.env,
   CODEX_MANAGED_PACKAGE_ROOT: codexPackageRoot,
+  CODEX_NPM_PACKAGE_NAME: codexNpmName,
 };
+const repositoryUrl =
+  typeof codexPackageJson.repository === "string"
+    ? codexPackageJson.repository
+    : codexPackageJson.repository?.url;
+if (repositoryUrl) {
+  const repositoryMatch = repositoryUrl.match(
+    /github\.com[/:]([^/]+)\/([^/#]+?)(?:\.git)?$/,
+  );
+  if (repositoryMatch) {
+    env.CODEX_GITHUB_REPOSITORY = `${repositoryMatch[1]}/${repositoryMatch[2]}`;
+  }
+}
 delete env.CODEX_MANAGED_BY_NPM;
 delete env.CODEX_MANAGED_BY_BUN;
 delete env.CODEX_MANAGED_BY_PNPM;
