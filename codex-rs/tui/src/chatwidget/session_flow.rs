@@ -253,17 +253,6 @@ impl ChatWidget {
         )));
     }
 
-    pub(crate) fn emit_prompt_edit_thread_event(&mut self) {
-        let line: Line<'static> = vec![
-            "• ".dim(),
-            "You’re continuing from this point in a new conversation".into(),
-        ]
-        .into();
-        self.app_event_tx.send(AppEvent::InsertHistoryCell(Box::new(
-            PlainHistoryCell::new(vec![line]),
-        )));
-    }
-
     /// Update status surfaces before a confirmed manual rename's server notification arrives.
     pub(crate) fn expect_manual_thread_name(&mut self, thread_id: ThreadId, name: String) {
         if self.thread_id == Some(thread_id) {

@@ -102,6 +102,10 @@ use codex_app_server_protocol::ThreadReadParams;
 use codex_app_server_protocol::ThreadReadResponse;
 use codex_app_server_protocol::ThreadResumeParams;
 use codex_app_server_protocol::ThreadResumeResponse;
+use codex_app_server_protocol::ThreadRevertParams;
+use codex_app_server_protocol::ThreadRevertResponse;
+use codex_app_server_protocol::ThreadRollbackParams;
+use codex_app_server_protocol::ThreadRollbackResponse;
 use codex_app_server_protocol::ThreadSetNameParams;
 use codex_app_server_protocol::ThreadSetNameResponse;
 use codex_app_server_protocol::ThreadSettingsUpdateParams;
@@ -1113,6 +1117,53 @@ impl AppServerSession {
         )
         .await?;
         Ok(response.thread)
+    }
+
+    /// Remove the selected prompt and all newer turns while preserving the thread ID.
+    ///
+    /// Paginated threads use the durable in-place revert API. Legacy threads use the deprecated
+    /// rollback API until their rollout has been migrated.
+    pub(crate) async fn revert_thread_before_prompt(
+        &mut self,
+        thread_id: ThreadId,
+        before_turn_id: String,
+        num_turns: u32,
+    ) -> Result<()> {
+        let history_mode = self
+            .thread_read(thread_id, /*include_turns*/ false)
+            .await?
+            .history_mode;
+        match history_mode {
+            ThreadHistoryMode::Paginated => {
+                let request_id = self.next_request_id();
+                let _: ThreadRevertResponse = self
+                    .client
+                    .request_typed(ClientRequest::ThreadRevert {
+                        request_id,
+                        params: ThreadRevertParams {
+                            thread_id: thread_id.to_string(),
+                            before_turn_id,
+                        },
+                    })
+                    .await
+                    .wrap_err("failed to revert thread before the selected prompt")?;
+            }
+            ThreadHistoryMode::Legacy => {
+                let request_id = self.next_request_id();
+                let _: ThreadRollbackResponse = self
+                    .client
+                    .request_typed(ClientRequest::ThreadRollback {
+                        request_id,
+                        params: ThreadRollbackParams {
+                            thread_id: thread_id.to_string(),
+                            num_turns,
+                        },
+                    })
+                    .await
+                    .wrap_err("failed to roll back thread before the selected prompt")?;
+            }
+        }
+        Ok(())
     }
 
     pub(crate) async fn thread_archive(&mut self, thread_id: ThreadId) -> Result<()> {

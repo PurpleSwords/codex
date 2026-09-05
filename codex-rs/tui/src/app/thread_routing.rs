@@ -1357,9 +1357,6 @@ impl App {
             self.app_event_tx
                 .send(AppEvent::EndInitialHistoryReplayBuffer);
         }
-        if matches!(presentation, ThreadAttachPresentation::PromptEdit) {
-            self.chat_widget.emit_prompt_edit_thread_event();
-        }
         let pending = std::mem::take(&mut self.pending_primary_events);
         for pending_event in pending {
             match pending_event {

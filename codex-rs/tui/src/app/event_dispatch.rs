@@ -10,7 +10,7 @@ use super::session_lifecycle::ThreadAttachPresentation;
 use super::*;
 use crate::app_event::RecapTrigger;
 use crate::app_event::ThreadTitleDestination;
-use crate::app_server_session::ForkGoalContinuation;
+use crate::app_server_session::ResumeModelSettings;
 use crate::app_server_session::UnsupportedLegacyPermissionProfile;
 use crate::app_server_session::turn_permissions_overrides;
 use crate::config_update::format_config_error;
@@ -50,7 +50,7 @@ impl App {
                     | AppEvent::SelectAgentThread(_)
                     | AppEvent::StartSide { .. }
                     | AppEvent::ForkCurrentSession { .. }
-                    | AppEvent::ForkSessionForPromptEdit { .. }
+                    | AppEvent::RevertSessionForPromptEdit { .. }
                     | AppEvent::SetThreadGoalDraft { .. }
                     | AppEvent::SetThreadGoalStatus {
                         status: ThreadGoalStatus::Active,
@@ -389,7 +389,7 @@ impl App {
                 self.chat_widget.maybe_send_next_queued_input();
                 tui.frame_requester().schedule_frame();
             }
-            AppEvent::ForkSessionForPromptEdit {
+            AppEvent::RevertSessionForPromptEdit {
                 thread_id,
                 nth_user_message,
                 mut prompt,
@@ -398,13 +398,10 @@ impl App {
                     return Ok(AppRunControl::Continue);
                 }
                 self.session_telemetry.counter(
-                    "codex.thread.fork",
+                    "codex.thread.revert",
                     /*inc*/ 1,
                     &[("source", "transcript")],
                 );
-                self.refresh_in_memory_config_from_disk_best_effort("forking the thread")
-                    .await;
-                let config = self.fresh_session_config();
                 let turns = match self.thread_event_channels.get(&thread_id) {
                     Some(channel) => {
                         let store = channel.store.lock().await;
@@ -459,62 +456,58 @@ impl App {
                     }
                     None => None,
                 };
-                let started = match turns {
-                    Some(turns) => match crate::app_backtrack::backtrack_fork_before_turn_id(
+                let before_turn_id = match turns {
+                    Some(turns) => crate::app_backtrack::backtrack_before_turn_id(
                         &turns,
                         nth_user_message,
                         &mut prompt,
-                    ) {
-                        Ok(before_turn_id)
-                            if before_turn_id.is_some()
-                                || app_server.has_older_history(thread_id) =>
-                        {
-                            let before_turn_id = before_turn_id
-                                .or_else(|| turns.first().map(|turn| turn.id.clone()));
-                            app_server
-                                .fork_thread_at(&self.local_settings, config.clone(),
-                                    thread_id,
-                                    /*last_turn_id*/ None,
-                                    before_turn_id,
-                                    ForkGoalContinuation::StartIfIdle,
-                                )
-                                .await
-                        }
-                        Ok(_) => {
-                            app_server
-                                .start_thread_with_session_start_source(
-&self.local_settings,
-                                    &config, /*session_start_source*/ None,
-                                    /*remote_cwd_override*/ None,
-                                )
-                                .await
-                        }
-                        Err(err) => Err(err),
-                    },
+                    ),
                     None => Err(color_eyre::eyre::eyre!(
                         "the selected thread is no longer available for prompt editing"
                     )),
                 };
-                match started {
-                    Ok(forked) => {
-                        self.shutdown_current_thread(app_server).await;
-                        match self
-                            .replace_chat_widget_with_app_server_thread(
-                                tui,
-                                forked,
-                                ThreadAttachPresentation::PromptEdit,
-                                /*initial_user_message*/ None,
+                // Legacy thread/rollback uses the same visible user-turn count that backs the
+                // transcript selection. Paginated history ignores this value and uses the turn ID.
+                let user_total = crate::app_backtrack::user_count(&self.transcript_cells);
+                let num_turns = user_total.saturating_sub(nth_user_message);
+                let num_turns = u32::try_from(num_turns).unwrap_or(u32::MAX);
+                let resumed = match before_turn_id {
+                    Ok(before_turn_id) if num_turns > 0 => match app_server
+                        .revert_thread_before_prompt(thread_id, before_turn_id, num_turns)
+                        .await
+                    {
+                        Ok(()) => app_server
+                            .resume_thread(
+                                &self.local_settings,
+                                self.config.clone(),
+                                thread_id,
+                                ResumeModelSettings::PreserveExistingThread,
                             )
-                            .await
-                        {
-                            Ok(()) => self.chat_widget.restore_user_message_to_composer(prompt),
-                            Err(err) => {
-                                self.restore_backtrack_prompt_after_branch_error(prompt, err);
-                            }
+                            .await,
+                        Err(err) => Err(err),
+                    },
+                    Ok(_) => Err(color_eyre::eyre::eyre!(
+                        "the selected prompt no longer has a rollback target"
+                    )),
+                    Err(err) => Err(err),
+                };
+                match resumed {
+                    Ok(resumed) => match self
+                        .replace_chat_widget_with_app_server_thread(
+                            tui,
+                            resumed,
+                            ThreadAttachPresentation::PromptEdit,
+                            /*initial_user_message*/ None,
+                        )
+                        .await
+                    {
+                        Ok(()) => self.chat_widget.restore_user_message_to_composer(prompt),
+                        Err(err) => {
+                            self.restore_backtrack_prompt_after_revert_error(prompt, err);
                         }
-                    }
+                    },
                     Err(err) => {
-                        self.restore_backtrack_prompt_after_branch_error(prompt, err);
+                        self.restore_backtrack_prompt_after_revert_error(prompt, err);
                     }
                 }
                 tui.frame_requester().schedule_frame();
