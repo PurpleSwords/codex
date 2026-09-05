@@ -6,6 +6,10 @@
 
 use std::fmt;
 use std::io::stdout;
+#[cfg(target_os = "linux")]
+use std::time::Duration;
+#[cfg(target_os = "linux")]
+use std::time::Instant;
 
 use codex_terminal_detection::TerminalName;
 use codex_terminal_detection::terminal_info;
@@ -16,18 +20,21 @@ use crossterm::event::PushKeyboardEnhancementFlags;
 use ratatui::crossterm::execute;
 
 const DISABLE_KEYBOARD_ENHANCEMENT_ENV_VAR: &str = "CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT";
+#[cfg(target_os = "linux")]
+const WINDOWS_TERM_PROGRAM_TIMEOUT: Duration = Duration::from_millis(500);
+#[cfg(target_os = "linux")]
+const WINDOWS_TERM_PROGRAM_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 pub(super) fn keyboard_enhancement_disabled() -> bool {
     let disable_env = std::env::var(DISABLE_KEYBOARD_ENHANCEMENT_ENV_VAR).ok();
-    let is_wsl = running_in_wsl();
-    let is_vscode_terminal = is_wsl && running_in_vscode_terminal();
-    keyboard_enhancement_disabled_for(disable_env.as_deref(), is_wsl, is_vscode_terminal)
+    keyboard_enhancement_disabled_for(disable_env.as_deref(), || {
+        running_in_wsl() && running_in_vscode_terminal()
+    })
 }
 
 fn keyboard_enhancement_disabled_for(
     disable_env: Option<&str>,
-    is_wsl: bool,
-    is_vscode_terminal: bool,
+    auto_detect: impl FnOnce() -> bool,
 ) -> bool {
     if let Some(disabled) = parse_bool_env(disable_env) {
         return disabled;
@@ -36,7 +43,7 @@ fn keyboard_enhancement_disabled_for(
     // VS Code running a WSL shell can hide TERM_PROGRAM from the Linux process
     // environment, so `running_in_vscode_terminal` also probes the Windows-side
     // environment through WSL interop.
-    is_wsl && is_vscode_terminal
+    auto_detect()
 }
 
 fn parse_bool_env(value: Option<&str>) -> Option<bool> {
@@ -64,20 +71,16 @@ fn running_in_wsl() -> bool {
 }
 
 pub(super) fn running_in_vscode_terminal() -> bool {
-    if term_program_is_vscode(std::env::var("TERM_PROGRAM").ok().as_deref()) {
-        return true;
-    }
-    vscode_terminal_detected(
-        std::env::var("TERM_PROGRAM").ok().as_deref(),
-        windows_term_program().as_deref(),
-    )
+    let term_program = std::env::var("TERM_PROGRAM").ok();
+    vscode_terminal_detected(term_program.as_deref(), windows_term_program)
 }
 
 fn vscode_terminal_detected(
     linux_term_program: Option<&str>,
-    windows_term_program: Option<&str>,
+    windows_term_program: impl FnOnce() -> Option<String>,
 ) -> bool {
-    term_program_is_vscode(linux_term_program) || term_program_is_vscode(windows_term_program)
+    term_program_is_vscode(linux_term_program)
+        || term_program_is_vscode(windows_term_program().as_deref())
 }
 
 fn term_program_is_vscode(value: Option<&str>) -> bool {
@@ -106,12 +109,14 @@ fn read_windows_term_program() -> Option<String> {
         return None;
     }
     let executable = codex_utils_path::system_executable("cmd.exe")?;
-    let output = std::process::Command::new(executable)
+    let working_directory = executable.parent()?;
+    let mut command = std::process::Command::new(&executable);
+    command
         .args(["/d", "/s", "/c", "set TERM_PROGRAM"])
+        .current_dir(working_directory)
         .stdin(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .output()
-        .ok()?;
+        .stderr(std::process::Stdio::null());
+    let output = run_command_with_timeout(&mut command, WINDOWS_TERM_PROGRAM_TIMEOUT).ok()??;
 
     if !output.status.success() {
         return None;
@@ -125,6 +130,34 @@ fn read_windows_term_program() -> Option<String> {
                 .map(str::to_string)
         })
         .filter(|value| !value.trim().is_empty())
+}
+
+#[cfg(target_os = "linux")]
+fn run_command_with_timeout(
+    command: &mut std::process::Command,
+    timeout: Duration,
+) -> std::io::Result<Option<std::process::Output>> {
+    let mut child = command.stdout(std::process::Stdio::piped()).spawn()?;
+    let deadline = Instant::now() + timeout;
+
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return child.wait_with_output().map(Some),
+            Ok(None) if Instant::now() < deadline => {
+                std::thread::sleep(WINDOWS_TERM_PROGRAM_POLL_INTERVAL);
+            }
+            Ok(None) => {
+                child.kill()?;
+                child.wait()?;
+                return Ok(None);
+            }
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(error);
+            }
+        }
+    }
 }
 
 pub(super) fn enable_keyboard_enhancement() {
@@ -321,6 +354,8 @@ mod tests {
     use super::keyboard_enhancement_disabled_for;
     use super::keyboard_enhancement_flags;
     use super::parse_bool_env;
+    #[cfg(target_os = "linux")]
+    use super::run_command_with_timeout;
     use super::tmux_session_detected;
     use super::tmux_should_enable_modify_other_keys_for;
     use super::vscode_terminal_detected;
@@ -434,51 +469,65 @@ mod tests {
     #[test]
     fn keyboard_enhancement_auto_disables_for_vscode_in_wsl() {
         assert!(keyboard_enhancement_disabled_for(
-            /*disable_env*/ None, /*is_wsl*/ true, /*is_vscode_terminal*/ true
+            /*disable_env*/ None,
+            || true
         ));
     }
 
     #[test]
     fn keyboard_enhancement_auto_disable_requires_wsl_and_vscode() {
         assert!(!keyboard_enhancement_disabled_for(
-            /*disable_env*/ None, /*is_wsl*/ true, /*is_vscode_terminal*/ false
-        ));
-        assert!(!keyboard_enhancement_disabled_for(
-            /*disable_env*/ None, /*is_wsl*/ false, /*is_vscode_terminal*/ true
+            /*disable_env*/ None,
+            || false
         ));
     }
 
     #[test]
-    fn keyboard_enhancement_env_flag_overrides_auto_detection() {
-        assert!(!keyboard_enhancement_disabled_for(
-            Some("0"),
-            /*is_wsl*/ true,
-            /*is_vscode_terminal*/ true
-        ));
-        assert!(keyboard_enhancement_disabled_for(
-            Some("1"),
-            /*is_wsl*/ false,
-            /*is_vscode_terminal*/ false
-        ));
+    fn keyboard_enhancement_env_flag_skips_auto_detection() {
+        assert!(!keyboard_enhancement_disabled_for(Some("0"), || panic!(
+            "explicit enable should skip auto detection"
+        )));
+        assert!(keyboard_enhancement_disabled_for(Some("1"), || panic!(
+            "explicit disable should skip auto detection"
+        )));
     }
 
     #[test]
     fn vscode_terminal_detection_uses_linux_and_windows_term_program() {
-        assert!(vscode_terminal_detected(
-            Some("vscode"),
-            /*windows_term_program*/ None
-        ));
+        assert!(vscode_terminal_detected(Some("vscode"), || panic!(
+            "Linux TERM_PROGRAM should skip the Windows probe"
+        )));
         assert!(vscode_terminal_detected(
             /*linux_term_program*/ None,
-            Some("vscode")
+            || Some("vscode".to_string())
         ));
         assert!(!vscode_terminal_detected(
             /*linux_term_program*/ None,
-            Some("WindowsTerminal")
+            || Some("WindowsTerminal".to_string())
         ));
         assert!(!vscode_terminal_detected(
-            /*linux_term_program*/ None, /*windows_term_program*/ None
+            /*linux_term_program*/ None,
+            || None
         ));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn command_timeout_terminates_a_hanging_process() {
+        let executable = codex_utils_path::system_executable("sleep")
+            .expect("sleep should be available in a system directory");
+        let mut command = std::process::Command::new(executable);
+        command
+            .arg("30")
+            .stdin(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        let start = std::time::Instant::now();
+
+        let output = run_command_with_timeout(&mut command, std::time::Duration::from_millis(20))
+            .expect("timeout helper should terminate and reap the process");
+
+        assert!(output.is_none());
+        assert!(start.elapsed() < std::time::Duration::from_secs(2));
     }
 
     #[test]

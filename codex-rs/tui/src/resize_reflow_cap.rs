@@ -9,7 +9,6 @@
 //! make interactive resize feel worse without giving the user more usable history.
 
 use codex_config::types::DEFAULT_TERMINAL_RESIZE_REFLOW_FALLBACK_MAX_ROWS;
-use codex_terminal_detection::TerminalInfo;
 use codex_terminal_detection::TerminalName;
 use codex_terminal_detection::terminal_info;
 
@@ -27,23 +26,20 @@ const ALACRITTY_RESIZE_REFLOW_MAX_ROWS: usize = 10_000;
 /// whose terminal-name metadata points at the host shell rather than VS Code itself. Returning
 /// `None` means the user explicitly disabled row limiting with `max_rows = 0`.
 pub(crate) fn resize_reflow_max_rows(config: TerminalResizeReflowConfig) -> Option<usize> {
-    resize_reflow_max_rows_for(
-        config,
-        &terminal_info(),
-        crate::tui::running_in_vscode_terminal(),
-    )
+    resize_reflow_max_rows_with_auto(config, || {
+        auto_resize_reflow_max_rows(
+            terminal_info().name,
+            crate::tui::running_in_vscode_terminal(),
+        )
+    })
 }
 
-fn resize_reflow_max_rows_for(
+fn resize_reflow_max_rows_with_auto(
     config: TerminalResizeReflowConfig,
-    terminal: &TerminalInfo,
-    running_in_vscode_terminal: bool,
+    auto_max_rows: impl FnOnce() -> usize,
 ) -> Option<usize> {
     match config.max_rows {
-        TerminalResizeReflowMaxRows::Auto => Some(auto_resize_reflow_max_rows(
-            terminal.name,
-            running_in_vscode_terminal,
-        )),
+        TerminalResizeReflowMaxRows::Auto => Some(auto_max_rows()),
         TerminalResizeReflowMaxRows::Disabled => None,
         TerminalResizeReflowMaxRows::Limit(max_rows) => Some(max_rows),
     }
@@ -79,16 +75,7 @@ fn auto_resize_reflow_max_rows(
 mod tests {
     use super::*;
     use codex_terminal_detection::Multiplexer;
-
-    fn test_terminal(name: TerminalName) -> TerminalInfo {
-        TerminalInfo {
-            name,
-            term_program: None,
-            version: None,
-            term: None,
-            multiplexer: None,
-        }
-    }
+    use codex_terminal_detection::TerminalInfo;
 
     #[test]
     fn auto_resize_reflow_max_rows_uses_terminal_defaults() {
@@ -134,30 +121,28 @@ mod tests {
 
     #[test]
     fn configured_resize_reflow_max_rows_overrides_auto_detection() {
-        let terminal = test_terminal(TerminalName::VsCode);
         let config = TerminalResizeReflowConfig {
             max_rows: TerminalResizeReflowMaxRows::Limit(42),
         };
 
         assert_eq!(
-            resize_reflow_max_rows_for(
-                config, &terminal, /*running_in_vscode_terminal*/ false
-            ),
+            resize_reflow_max_rows_with_auto(config, || panic!(
+                "explicit limit should skip detection"
+            )),
             Some(42)
         );
     }
 
     #[test]
     fn disabled_resize_reflow_max_rows_keeps_all_rows() {
-        let terminal = test_terminal(TerminalName::VsCode);
         let config = TerminalResizeReflowConfig {
             max_rows: TerminalResizeReflowMaxRows::Disabled,
         };
 
         assert_eq!(
-            resize_reflow_max_rows_for(
-                config, &terminal, /*running_in_vscode_terminal*/ false
-            ),
+            resize_reflow_max_rows_with_auto(config, || panic!(
+                "disabled reflow should skip detection"
+            )),
             None
         );
     }
@@ -174,9 +159,12 @@ mod tests {
         let config = TerminalResizeReflowConfig::default();
 
         assert_eq!(
-            resize_reflow_max_rows_for(
-                config, &terminal, /*running_in_vscode_terminal*/ false
-            ),
+            resize_reflow_max_rows_with_auto(config, || {
+                auto_resize_reflow_max_rows(
+                    terminal.name,
+                    /*running_in_vscode_terminal*/ false,
+                )
+            }),
             Some(DEFAULT_TERMINAL_RESIZE_REFLOW_FALLBACK_MAX_ROWS)
         );
     }
