@@ -4,8 +4,8 @@ This repository is a community-maintained fork of `openai/codex`. It is not an o
 
 Fork-specific release metadata lives in `fork-release.json`. The npm package is built under a separate scope, while the native executable and command remain named `codex` for compatibility.
 
-Releases use calendar versions in `YYYY.M.D` form and Git tags in `fork-vYYYY.M.D` form. If more than one release is needed on the same day, increment the patch component beyond the day, for example `2026.9.6` after `2026.9.5`.
+Formal releases reuse the upstream Codex version they track, for example npm version `0.153.4` and Git tag `fork-v0.153.4`. The separate npm scope and `fork-v` tag prefix distinguish these builds from official releases. A given version is published only once; later fork releases move to a newer upstream Codex version.
 
 The `fork-release.yml` workflow builds unsigned native packages on GitHub-hosted runners for Linux, macOS, and Windows on x64 and arm64. It can create a GitHub release without publishing to npm. npm publishing is a separate opt-in input so build artifacts can be inspected first.
 
-For the first npm publication, create and verify the npm account that owns the configured scope, log in locally, and publish the six platform tarballs before the root tarball. After the package exists, configure npm trusted publishing for `PurpleSwords/codex` and workflow filename `fork-release.yml`; later releases can publish through GitHub Actions using OIDC.
+The npm package was initialized with `0.0.0-init` under the non-default `init` dist-tag solely to establish ownership. Formal versions are published by GitHub Actions after configuring npm trusted publishing for `PurpleSwords/codex` and workflow filename `fork-release.yml`; no long-lived npm token is required.

@@ -10,7 +10,11 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = REPO_ROOT / "fork-release.json"
 WORKSPACE_MANIFEST = REPO_ROOT / "codex-rs" / "Cargo.toml"
-VERSION_PATTERN = re.compile(r"(?:[1-9][0-9]{3})\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)")
+NUMBER_PATTERN = r"(?:0|[1-9][0-9]*)"
+VERSION_PATTERN = re.compile(
+    rf"0\.{NUMBER_PATTERN}\.{NUMBER_PATTERN}"
+    rf"(?:-(?:alpha(?:\.{NUMBER_PATTERN}){{0,2}}|beta(?:\.{NUMBER_PATTERN})?))?"
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -42,7 +46,7 @@ def load_config() -> dict[str, str]:
 
 def validate_version(version: str) -> str:
     if VERSION_PATTERN.fullmatch(version) is None:
-        raise RuntimeError(f"Invalid calendar version: {version}")
+        raise RuntimeError(f"Invalid upstream Codex version: {version}")
     return version
 
 
