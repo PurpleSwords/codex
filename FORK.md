@@ -9,3 +9,5 @@ Formal releases reuse the upstream Codex version they track, for example npm ver
 The `fork-release.yml` workflow builds unsigned native packages on GitHub-hosted runners for Linux, macOS, and Windows on x64 and arm64. It can create a GitHub release without publishing to npm. npm publishing is a separate opt-in input so build artifacts can be inspected first.
 
 The npm package was initialized with `0.0.0-init` under the non-default `init` dist-tag solely to establish ownership. Formal versions are published by GitHub Actions after configuring npm trusted publishing for `PurpleSwords/codex` and workflow filename `fork-release.yml`; no long-lived npm token is required.
+
+If npm publishing fails after a GitHub release has already been created, rerun `fork-release.yml` with `publish_npm` and `reuse_release_assets` enabled. The recovery run skips native builds, downloads the npm tarballs from the existing `fork-v<version>` release, skips package versions that already exist on npm, and publishes the remainder through the same trusted workflow.

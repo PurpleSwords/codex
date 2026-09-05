@@ -17,6 +17,11 @@ on:
         required: true
         default: false
         type: boolean
+      reuse_release_assets:
+        description: Skip builds and publish npm tarballs from an existing fork-v<version> release
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -61,6 +66,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
   build:
+    if: ${{ !inputs.reuse_release_assets }}
     needs: prepare
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
@@ -197,6 +203,7 @@ jobs:
           if-no-files-found: error
 
   package-npm:
+    if: ${{ !inputs.reuse_release_assets }}
     needs:
       - prepare
       - build
@@ -236,7 +243,7 @@ jobs:
           if-no-files-found: error
 
   github-release:
-    if: inputs.create_github_release
+    if: ${{ inputs.create_github_release && !inputs.reuse_release_assets }}
     needs:
       - prepare
       - build
@@ -272,7 +279,16 @@ jobs:
             --notes "Unsigned community build from ${GITHUB_SHA}. See FORK.md in the repository for scope, cadence, and attribution."
 
   publish-npm:
-    if: inputs.publish_npm
+    if: >-
+      ${{
+        always() &&
+        inputs.publish_npm &&
+        needs.prepare.result == 'success' &&
+        (
+          (inputs.reuse_release_assets && needs.package-npm.result == 'skipped') ||
+          (!inputs.reuse_release_assets && needs.package-npm.result == 'success')
+        )
+      }}
     needs:
       - prepare
       - package-npm
@@ -286,10 +302,24 @@ jobs:
           node-version: "24"
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - if: ${{ !inputs.reuse_release_assets }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: npm-dist
           path: npm
+      - if: ${{ inputs.reuse_release_assets }}
+        name: Download npm tarballs from existing release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p npm
+          gh release download "fork-v${VERSION}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern 'codex-npm-*.tgz' \
+            --dir npm
       - name: Publish platform packages, then root package
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
@@ -297,26 +327,30 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for package_version in \
-            "${VERSION}-linux-x64" \
-            "${VERSION}-linux-arm64" \
-            "${VERSION}-darwin-x64" \
-            "${VERSION}-darwin-arm64" \
-            "${VERSION}-win32-x64" \
-            "${VERSION}-win32-arm64" \
-            "$VERSION"; do
+          publish_if_missing() {
+            local package_version="$1"
+            local tag="$2"
+            local tarball="$3"
+
             if npm view "${NPM_PACKAGE}@${package_version}" version >/dev/null 2>&1; then
-              echo "npm version ${NPM_PACKAGE}@${package_version} already exists" >&2
-              exit 1
+              echo "npm version ${NPM_PACKAGE}@${package_version} already exists; skipping"
+              return
             fi
-          done
-          for platform in linux-x64 linux-arm64 darwin-x64 darwin-arm64 win32-x64 win32-arm64; do
-            npm publish "npm/codex-npm-${platform}-${VERSION}.tgz" \
+
+            test -f "$tarball"
+            npm publish "$tarball" \
               --access public \
-              --tag "$platform" \
+              --tag "$tag" \
               --provenance
+          }
+
+          for platform in linux-x64 linux-arm64 darwin-x64 darwin-arm64 win32-x64 win32-arm64; do
+            publish_if_missing \
+              "${VERSION}-${platform}" \
+              "$platform" \
+              "./npm/codex-npm-${platform}-${VERSION}.tgz"
           done
-          npm publish "npm/codex-npm-${VERSION}.tgz" \
-            --access public \
-            --tag latest \
-            --provenance
+          publish_if_missing \
+            "$VERSION" \
+            latest \
+            "./npm/codex-npm-${VERSION}.tgz"
