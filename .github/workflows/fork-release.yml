@@ -22,6 +22,7 @@ permissions:
   contents: read
 
 env:
+  CODEX_REPO_ROOT: ${{ github.workspace }}
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   CARGO_TARGET_DIR: ${{ github.workspace }}/codex-rs/target
 
