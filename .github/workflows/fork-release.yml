@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       create_github_release:
-        description: Create a GitHub release after building
+        description: Create or update a GitHub release after building
         required: true
         default: true
         type: boolean
@@ -71,6 +71,8 @@ jobs:
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
+    env:
+      CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO: ${{ contains(matrix.target, 'apple-darwin') && 'packed' || 'off' }}
     strategy:
       fail-fast: false
       matrix:
@@ -185,6 +187,19 @@ jobs:
             fi
           fi
           cargo build --target "$target" --release "${build_args[@]}"
+      - if: runner.os != 'Windows'
+        name: Archive symbols and strip package binaries
+        working-directory: codex-rs
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="${{ matrix.target }}"
+          bash "${GITHUB_WORKSPACE}/.github/scripts/archive-release-symbols-and-strip-binaries.sh" \
+            --target "$target" \
+            --artifact-name "$target" \
+            --release-dir "$CARGO_TARGET_DIR/$target/release" \
+            --archive-dir "$RUNNER_TEMP/codex-symbols-archives" \
+            --binaries "codex codex-code-mode-host"
       - name: Build native package archive
         working-directory: codex-rs
         shell: bash
@@ -260,23 +275,33 @@ jobs:
         with:
           name: npm-dist
           path: npm
-      - name: Create release
+      - name: Create or update release
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.prepare.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
-          if gh release view "fork-v${VERSION}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "GitHub release fork-v${VERSION} already exists" >&2
-            exit 1
-          fi
           mapfile -d '' assets < <(find native npm -type f -print0)
-          gh release create "fork-v${VERSION}" "${assets[@]}" \
-            --repo "$GITHUB_REPOSITORY" \
-            --target "$GITHUB_SHA" \
-            --title "Community Codex ${VERSION}" \
-            --notes "Unsigned community build from ${GITHUB_SHA}. See FORK.md in the repository for scope, cadence, and attribution."
+          tag="fork-v${VERSION}"
+          title="Community Codex ${VERSION}"
+          notes="Unsigned community build from ${GITHUB_SHA}. See FORK.md in the repository for scope, cadence, and attribution."
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag" "${assets[@]}" \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+            gh release edit "$tag" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "$title" \
+              --notes "$notes"
+          else
+            gh release create "$tag" "${assets[@]}" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "$title" \
+              --notes "$notes"
+          fi
 
   publish-npm:
     if: >-
