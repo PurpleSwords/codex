@@ -456,23 +456,33 @@ impl App {
                     }
                     None => None,
                 };
-                let before_turn_id = match turns {
-                    Some(turns) => crate::app_backtrack::backtrack_before_turn_id(
+                let rollback_target = match turns {
+                    Some(turns) => match crate::app_backtrack::backtrack_before_turn_id(
                         &turns,
                         nth_user_message,
                         &mut prompt,
-                    ),
+                    ) {
+                        Ok(before_turn_id) => {
+                            match turns.iter().position(|turn| turn.id == before_turn_id) {
+                                Some(turn_index) => {
+                                    let num_turns = turns.len().saturating_sub(turn_index);
+                                    let num_turns =
+                                        u32::try_from(num_turns).unwrap_or(u32::MAX);
+                                    Ok((before_turn_id, num_turns))
+                                }
+                                None => Err(color_eyre::eyre::eyre!(
+                                    "the selected prompt turn is no longer available for rollback"
+                                )),
+                            }
+                        }
+                        Err(err) => Err(err),
+                    },
                     None => Err(color_eyre::eyre::eyre!(
                         "the selected thread is no longer available for prompt editing"
                     )),
                 };
-                // Legacy thread/rollback uses the same visible user-turn count that backs the
-                // transcript selection. Paginated history ignores this value and uses the turn ID.
-                let user_total = crate::app_backtrack::user_count(&self.transcript_cells);
-                let num_turns = user_total.saturating_sub(nth_user_message);
-                let num_turns = u32::try_from(num_turns).unwrap_or(u32::MAX);
-                let resumed = match before_turn_id {
-                    Ok(before_turn_id) if num_turns > 0 => match app_server
+                let resumed = match rollback_target {
+                    Ok((before_turn_id, num_turns)) => match app_server
                         .revert_thread_before_prompt(thread_id, before_turn_id, num_turns)
                         .await
                     {
@@ -486,9 +496,6 @@ impl App {
                             .await,
                         Err(err) => Err(err),
                     },
-                    Ok(_) => Err(color_eyre::eyre::eyre!(
-                        "the selected prompt no longer has a rollback target"
-                    )),
                     Err(err) => Err(err),
                 };
                 match resumed {
