@@ -50,6 +50,10 @@ permissions:
   actions: read
   contents: read
 
+concurrency:
+  group: fork-release-${{ inputs.version }}
+  cancel-in-progress: false
+
 env:
   CODEX_REPO_ROOT: ${{ github.workspace }}
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
@@ -80,6 +84,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "Fork releases must be dispatched from the main branch, not $GITHUB_REF" >&2
+            exit 1
+          fi
           version="$(python3 scripts/fork_release.py validate-version "$VERSION")"
           configured_repository="$(python3 scripts/fork_release.py config githubRepository)"
           if [[ "$configured_repository" != "$GITHUB_REPOSITORY" ]]; then

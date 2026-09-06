@@ -1,10 +1,14 @@
-name: postmerge-ci
+name: fork-full-ci
 
-# This is the single entrypoint for main-only CI that is intentionally outside
-# the merge-blocking suite. It keeps the broader postmerge signal in one run.
+# Run the heavyweight cross-platform suites explicitly after reviewing the
+# normal fork CI result. Keeping this manual avoids duplicate runs and failure
+# notifications for every push to main.
 on:
-  push:
-    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: fork-full-ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   # Keep reusable workflow calls alphabetized. Each child retains its own
@@ -12,23 +16,20 @@ jobs:
   rust-ci-full:
     name: rust-ci-full
     uses: ./.github/workflows/rust-ci-full.yml
-    secrets: inherit
 
   v8-canary:
     name: v8-canary
     uses: ./.github/workflows/v8-canary.yml
-    secrets: inherit
 
   results:
-    name: Postmerge CI results
+    name: Fork full CI results
     needs:
       - rust-ci-full
       - v8-canary
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     steps:
-      # Postmerge runs use the pushed main commit, so this helper always comes
-      # from the same revision that defined the parent workflow.
+      # Use the same revision that defined the manually dispatched parent.
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ github.sha }}

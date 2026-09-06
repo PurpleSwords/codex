@@ -2,10 +2,10 @@
 
 """Decide which V8 canary work is needed for a commit range.
 
-The workflow deliberately has no trigger-level path filters because it is both
-directly triggered for pull requests and called by postmerge-ci. Keeping the
-patterns here gives those entrypoints one source of truth; unrelated events
-still run metadata but skip the expensive build matrices.
+The workflow deliberately has no trigger-level path filters because it can be
+called by fork-full-ci or dispatched directly. Keeping the patterns here gives
+those entrypoints one source of truth; unrelated called events still run
+metadata but skip the expensive build matrices.
 """
 
 import argparse
