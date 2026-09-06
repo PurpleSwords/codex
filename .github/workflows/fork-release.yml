@@ -40,6 +40,11 @@ on:
         required: false
         default: ""
         type: string
+      target_artifact_run_id:
+        description: Prior workflow run containing an already-built artifact for build_target
+        required: false
+        default: ""
+        type: string
 
 permissions:
   actions: read
@@ -70,6 +75,7 @@ jobs:
           VERSION: ${{ inputs.version }}
           BUILD_TARGET: ${{ inputs.build_target }}
           REUSE_RUN_ID: ${{ inputs.reuse_run_id }}
+          TARGET_ARTIFACT_RUN_ID: ${{ inputs.target_artifact_run_id }}
           REUSE_RELEASE_ASSETS: ${{ inputs.reuse_release_assets }}
         shell: bash
         run: |
@@ -82,8 +88,8 @@ jobs:
           fi
 
           if [[ "$BUILD_TARGET" == "all" ]]; then
-            if [[ -n "$REUSE_RUN_ID" && "$REUSE_RELEASE_ASSETS" != "true" ]]; then
-              echo "reuse_run_id is only valid when repairing one build_target" >&2
+            if [[ "$REUSE_RELEASE_ASSETS" != "true" && ( -n "$REUSE_RUN_ID" || -n "$TARGET_ARTIFACT_RUN_ID" ) ]]; then
+              echo "artifact run IDs are only valid when repairing one build_target" >&2
               exit 1
             fi
             build_matrix='{"include":[{"runner":"ubuntu-24.04","target":"x86_64-unknown-linux-musl"},{"runner":"ubuntu-24.04-arm","target":"aarch64-unknown-linux-musl"},{"runner":"macos-15-intel","target":"x86_64-apple-darwin"},{"runner":"macos-15","target":"aarch64-apple-darwin"},{"runner":"windows-2025","target":"x86_64-pc-windows-msvc"},{"runner":"windows-11-arm","target":"aarch64-pc-windows-msvc"}]}'
@@ -114,7 +120,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
   build:
-    if: ${{ !inputs.reuse_release_assets }}
+    if: ${{ !inputs.reuse_release_assets && inputs.target_artifact_run_id == '' }}
     needs: prepare
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
@@ -253,7 +259,16 @@ jobs:
           if-no-files-found: error
 
   package-npm:
-    if: ${{ !inputs.reuse_release_assets }}
+    if: >-
+      ${{
+        always() &&
+        !inputs.reuse_release_assets &&
+        needs.prepare.result == 'success' &&
+        (
+          needs.build.result == 'success' ||
+          (inputs.target_artifact_run_id != '' && needs.build.result == 'skipped')
+        )
+      }}
     needs:
       - prepare
       - build
@@ -281,10 +296,29 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --pattern '*-*-*' \
             --dir artifacts
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - if: ${{ inputs.target_artifact_run_id != '' }}
+        name: Download repaired target artifact from prior run
+        env:
+          BUILD_TARGET: ${{ inputs.build_target }}
+          GH_TOKEN: ${{ github.token }}
+          TARGET_ARTIFACT_RUN_ID: ${{ inputs.target_artifact_run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh run download "$TARGET_ARTIFACT_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "$BUILD_TARGET" \
+            --dir "artifacts/$BUILD_TARGET"
+      - if: ${{ inputs.target_artifact_run_id == '' && inputs.build_target == 'all' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: "*-*-*"
           path: artifacts
+      - if: ${{ inputs.target_artifact_run_id == '' && inputs.build_target != 'all' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.build_target }}
+          path: artifacts/${{ inputs.build_target }}
       - name: Build npm tarballs
         shell: bash
         run: |
@@ -306,7 +340,18 @@ jobs:
           if-no-files-found: error
 
   github-release:
-    if: ${{ inputs.create_github_release && !inputs.reuse_release_assets }}
+    if: >-
+      ${{
+        always() &&
+        inputs.create_github_release &&
+        !inputs.reuse_release_assets &&
+        needs.prepare.result == 'success' &&
+        needs.package-npm.result == 'success' &&
+        (
+          needs.build.result == 'success' ||
+          (inputs.target_artifact_run_id != '' && needs.build.result == 'skipped')
+        )
+      }}
     needs:
       - prepare
       - build
@@ -329,10 +374,29 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --pattern '*-*-*' \
             --dir native
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - if: ${{ inputs.target_artifact_run_id != '' }}
+        name: Download repaired target artifact from prior run
+        env:
+          BUILD_TARGET: ${{ inputs.build_target }}
+          GH_TOKEN: ${{ github.token }}
+          TARGET_ARTIFACT_RUN_ID: ${{ inputs.target_artifact_run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh run download "$TARGET_ARTIFACT_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "$BUILD_TARGET" \
+            --dir "native/$BUILD_TARGET"
+      - if: ${{ inputs.target_artifact_run_id == '' && inputs.build_target == 'all' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: "*-*-*"
           path: native
+      - if: ${{ inputs.target_artifact_run_id == '' && inputs.build_target != 'all' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.build_target }}
+          path: native/${{ inputs.build_target }}
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: npm-dist
