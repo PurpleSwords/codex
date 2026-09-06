@@ -12,8 +12,8 @@ runs:
   using: composite
   steps:
     # setup-ci expects either this step or the Unix fallback below to define
-    # CI_BUILD_ROOT. Windows puts it on a Dev Drive because Cargo and Bazel
-    # spend significant time reading and writing build/cache trees.
+    # CI_BUILD_ROOT. Windows prefers a Dev Drive because Cargo and Bazel spend
+    # significant time doing I/O, with a normal-volume fallback on Server 2022.
     - name: Configure Dev Drive (Windows)
       if: runner.os == 'Windows'
       shell: pwsh

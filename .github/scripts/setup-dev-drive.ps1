@@ -1,9 +1,9 @@
 # Configure a fast drive for Windows CI jobs.
 #
 # GitHub-hosted Windows runners do not always expose a secondary D: volume. When
-# they do not, create a Dev Drive VHD. CI depends on this path for its
-# build directories where CI spends significant time doing I/O, so fail the
-# job if no real Dev Drive is available.
+# the image supports Dev Drive, create a VHD if necessary. Windows Server 2022
+# does not expose Format-Volume's -DevDrive parameter, so use the runner's
+# ordinary work volume there instead.
 
 function Test-DevDrive {
     param([string]$Drive)
@@ -22,9 +22,20 @@ function Invoke-BestEffort {
     }
 }
 
-if ((Test-Path "D:\") -and (Test-DevDrive "D:")) {
+$FormatVolume = Get-Command Format-Volume -ErrorAction Stop
+$SupportsDevDrive = $FormatVolume.Parameters.ContainsKey("DevDrive")
+
+if ($SupportsDevDrive -and (Test-Path "D:\") -and (Test-DevDrive "D:")) {
     Write-Output "Using existing Dev Drive at D:"
     $Drive = "D:"
+} elseif (-not $SupportsDevDrive) {
+    if (Test-Path "D:\") {
+        $Drive = "D:"
+    } else {
+        $Drive = [System.IO.Path]::GetPathRoot($env:RUNNER_TEMP).TrimEnd("\")
+    }
+
+    Write-Warning "Dev Drive is unavailable on this Windows image; using the standard volume at $Drive"
 } else {
     if (Test-Path "D:\") {
         Write-Output "Existing D: volume is not a Dev Drive; provisioning a new Dev Drive VHD."
