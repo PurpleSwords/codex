@@ -22,8 +22,27 @@ on:
         required: true
         default: false
         type: boolean
+      build_target:
+        description: Build all platforms or repair one platform using artifacts from reuse_run_id
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - x86_64-unknown-linux-musl
+          - aarch64-unknown-linux-musl
+          - x86_64-apple-darwin
+          - aarch64-apple-darwin
+          - x86_64-pc-windows-msvc
+          - aarch64-pc-windows-msvc
+      reuse_run_id:
+        description: Prior workflow run whose successful native artifacts complete a single-target repair
+        required: false
+        default: ""
+        type: string
 
 permissions:
+  actions: read
   contents: read
 
 env:
@@ -40,6 +59,7 @@ jobs:
       repository_url: ${{ steps.release.outputs.repository_url }}
       description: ${{ steps.release.outputs.description }}
       readme: ${{ steps.release.outputs.readme }}
+      build_matrix: ${{ steps.release.outputs.build_matrix }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -48,6 +68,9 @@ jobs:
         name: Validate release metadata
         env:
           VERSION: ${{ inputs.version }}
+          BUILD_TARGET: ${{ inputs.build_target }}
+          REUSE_RUN_ID: ${{ inputs.reuse_run_id }}
+          REUSE_RELEASE_ASSETS: ${{ inputs.reuse_release_assets }}
         shell: bash
         run: |
           set -euo pipefail
@@ -57,12 +80,37 @@ jobs:
             echo "fork-release.json targets $configured_repository, not $GITHUB_REPOSITORY" >&2
             exit 1
           fi
+
+          if [[ "$BUILD_TARGET" == "all" ]]; then
+            if [[ -n "$REUSE_RUN_ID" && "$REUSE_RELEASE_ASSETS" != "true" ]]; then
+              echo "reuse_run_id is only valid when repairing one build_target" >&2
+              exit 1
+            fi
+            build_matrix='{"include":[{"runner":"ubuntu-24.04","target":"x86_64-unknown-linux-musl"},{"runner":"ubuntu-24.04-arm","target":"aarch64-unknown-linux-musl"},{"runner":"macos-15-intel","target":"x86_64-apple-darwin"},{"runner":"macos-15","target":"aarch64-apple-darwin"},{"runner":"windows-2025","target":"x86_64-pc-windows-msvc"},{"runner":"windows-11-arm","target":"aarch64-pc-windows-msvc"}]}'
+          else
+            if [[ -z "$REUSE_RUN_ID" ]]; then
+              echo "A single build_target requires reuse_run_id for the other platform artifacts" >&2
+              exit 1
+            fi
+            case "$BUILD_TARGET" in
+              x86_64-unknown-linux-musl) runner="ubuntu-24.04" ;;
+              aarch64-unknown-linux-musl) runner="ubuntu-24.04-arm" ;;
+              x86_64-apple-darwin) runner="macos-15-intel" ;;
+              aarch64-apple-darwin) runner="macos-15" ;;
+              x86_64-pc-windows-msvc) runner="windows-2025" ;;
+              aarch64-pc-windows-msvc) runner="windows-11-arm" ;;
+              *) echo "Unsupported build_target: $BUILD_TARGET" >&2; exit 1 ;;
+            esac
+            printf -v build_matrix '{"include":[{"runner":"%s","target":"%s"}]}' "$runner" "$BUILD_TARGET"
+          fi
+
           {
             echo "version=$version"
             echo "npm_package=$(python3 scripts/fork_release.py config npmPackage)"
             echo "repository_url=$(python3 scripts/fork_release.py config repositoryUrl)"
             echo "description=$(python3 scripts/fork_release.py config description)"
             echo "readme=$(python3 scripts/fork_release.py config readme)"
+            echo "build_matrix=$build_matrix"
           } >> "$GITHUB_OUTPUT"
 
   build:
@@ -70,25 +118,12 @@ jobs:
     needs: prepare
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 120
+    timeout-minutes: 180
     env:
       CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO: ${{ contains(matrix.target, 'apple-darwin') && 'packed' || 'off' }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - runner: ubuntu-24.04
-            target: x86_64-unknown-linux-musl
-          - runner: ubuntu-24.04-arm
-            target: aarch64-unknown-linux-musl
-          - runner: macos-15-intel
-            target: x86_64-apple-darwin
-          - runner: macos-15
-            target: aarch64-apple-darwin
-          - runner: windows-2025
-            target: x86_64-pc-windows-msvc
-          - runner: windows-11-arm
-            target: aarch64-pc-windows-msvc
+      matrix: ${{ fromJSON(needs.prepare.outputs.build_matrix) }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -233,6 +268,19 @@ jobs:
           node-version: "24"
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
+      - if: ${{ inputs.reuse_run_id != '' }}
+        name: Download native artifacts from prior run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REUSE_RUN_ID: ${{ inputs.reuse_run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          gh run download "$REUSE_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern '*-*-*' \
+            --dir artifacts
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: "*-*-*"
@@ -265,8 +313,22 @@ jobs:
       - package-npm
     runs-on: ubuntu-24.04
     permissions:
+      actions: read
       contents: write
     steps:
+      - if: ${{ inputs.reuse_run_id != '' }}
+        name: Download native artifacts from prior run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REUSE_RUN_ID: ${{ inputs.reuse_run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p native
+          gh run download "$REUSE_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern '*-*-*' \
+            --dir native
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: "*-*-*"
