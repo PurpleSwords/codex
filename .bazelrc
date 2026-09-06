@@ -102,6 +102,18 @@ common:ci --disk_cache=
 common:ci-bazel --config=ci
 common:ci-bazel --build_metadata=TAG_workflow=bazel
 
+# Local CI variants for community forks and other environments without an RBE
+# credential. They preserve the ordinary CI policy while capping parallelism
+# for standard GitHub-hosted runners.
+common:ci-local --jobs=4
+common:ci-linux-local --config=ci-bazel
+common:ci-linux-local --config=ci-local
+common:ci-linux-local --build_metadata=TAG_os=linux
+common:ci-macos-local --config=ci-macos
+common:ci-macos-local --config=ci-local
+common:ci-windows-local --config=ci-windows
+common:ci-windows-local --config=ci-local
+
 # Shared config for Bazel-backed Rust linting.
 build:clippy --aspects=@rules_rust//rust:defs.bzl%rust_clippy_aspect
 build:clippy --output_groups=+clippy_checks
@@ -194,6 +206,19 @@ common:ci-windows-cross --test_env=CODEX_BAZEL_TEST_SKIP_FILTERS=command_safety:
 common:ci-windows-cross --platforms=//:windows_x86_64_gnullvm
 common:ci-windows-cross --extra_execution_platforms=//:rbe,//:windows_x86_64_msvc
 common:ci-windows-cross --extra_toolchains=//:windows_gnullvm_tests_on_msvc_host_toolchain
+
+# Build gnullvm targets and run their tests on the local Windows MSVC host when
+# authenticated Linux RBE is unavailable.
+common:ci-windows-cross-local --config=ci-windows-local
+common:ci-windows-cross-local --build_metadata=TAG_windows_cross_compile=local
+common:ci-windows-cross-local --strategy=TestRunner=local
+common:ci-windows-cross-local --strategy=V8Mksnapshot=local
+common:ci-windows-cross-local --local_test_jobs=4
+common:ci-windows-cross-local --test_env=RUST_TEST_THREADS=1
+common:ci-windows-cross-local --test_env=CODEX_BAZEL_TEST_SKIP_FILTERS=command_safety::powershell_parser::tests::,suite::code_mode::code_mode_can_call_hidden_dynamic_tools,tests::windows_tests::conpty_ctrl_c_interrupts_powershell_foreground_child
+common:ci-windows-cross-local --platforms=//:windows_x86_64_gnullvm
+common:ci-windows-cross-local --extra_execution_platforms=//:windows_x86_64_msvc
+common:ci-windows-cross-local --extra_toolchains=//:windows_gnullvm_tests_on_msvc_host_toolchain
 
 # Linux-only V8 CI config.
 common:ci-v8 --config=ci

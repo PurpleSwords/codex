@@ -87,14 +87,9 @@ print_bazel_test_log_tails() {
   local console_log="$1"
   local testlogs_dir
 
-  local -a bazel_info_args=(info)
-  if [[ -n "${BUILDBUDDY_API_KEY:-}" ]]; then
-    # `bazel info` needs the same CI config as the failed test invocation so
-    # platform-specific output roots match. On Windows, omitting `ci-windows`
-    # would point at `local_windows-fastbuild` even when the test ran with the
-    # MSVC host platform under `local_windows_msvc-fastbuild`.
-    bazel_info_args+=("--config=${ci_config}")
-  fi
+  # `bazel info` needs the same CI config as the failed test invocation so
+  # platform-specific output roots match.
+  local -a bazel_info_args=(info "--config=${ci_config}")
 
   # Only pass flags that affect Bazel's output-root selection or repository
   # lookup. Test/build-only flags such as execution logs or remote download
@@ -256,10 +251,16 @@ if [[ ${#bazel_args[@]} -eq 0 || ${#bazel_targets[@]} -eq 0 ]]; then
 fi
 
 if [[ "${RUNNER_OS:-}" == "Windows" && $windows_cross_compile -eq 1 && -z "${BUILDBUDDY_API_KEY:-}" ]]; then
-  # Windows cross-compilation depends on authenticated RBE. Preserve the local
-  # Windows build shape when credentials are unavailable.
-  ci_config=ci-windows
+  # Keep the gnullvm target configuration while executing build helpers and
+  # tests on this Windows runner instead of Linux RBE.
+  ci_config=ci-windows-cross-local
   windows_msvc_host_platform=1
+elif [[ -z "${BUILDBUDDY_API_KEY:-}" ]]; then
+  case "$ci_config" in
+    ci-linux) ci_config=ci-linux-local ;;
+    ci-macos) ci_config=ci-macos-local ;;
+    ci-windows) ci_config=ci-windows-local ;;
+  esac
 fi
 
 post_config_bazel_args=()
@@ -297,13 +298,6 @@ if [[ "${RUNNER_OS:-}" == "Windows" && $windows_cross_compile -eq 1 && -n "${BUI
   # an explicit shell executable, remote Linux actions can be asked to run
   # `C:\Program Files\Git\usr\bin\bash.exe`.
   post_config_bazel_args+=(--host_platform=//:rbe --shell_executable=/bin/bash)
-fi
-
-if [[ "${RUNNER_OS:-}" == "Windows" && $windows_cross_compile -eq 1 && -z "${BUILDBUDDY_API_KEY:-}" ]]; then
-  # The Windows cross-compile config depends on authenticated remote
-  # execution. When credentials are unavailable, keep the local build shape
-  # and its lower concurrency cap.
-  post_config_bazel_args+=(--jobs=8)
 fi
 
 if [[ -n "${BAZEL_REPO_CONTENTS_CACHE:-}" ]]; then
@@ -382,12 +376,12 @@ trap 'rm -f "$bazel_console_log"' EXIT
 
 bazel_run_args=(
   "${bazel_args[@]}"
+  "--config=${ci_config}"
 )
 if [[ -n "${BUILDBUDDY_API_KEY:-}" ]]; then
   echo "BuildBuddy API key is available; using remote Bazel configuration."
-  bazel_run_args+=("--config=${ci_config}")
 else
-  echo "BuildBuddy API key is not available; using local Bazel configuration."
+  echo "BuildBuddy API key is not available; using ${ci_config}."
 fi
 if (( ${#post_config_bazel_args[@]} > 0 )); then
   bazel_run_args+=("${post_config_bazel_args[@]}")

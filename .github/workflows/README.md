@@ -45,7 +45,7 @@ and notification noise.
 
 - Linux x64/arm64 use `ubuntu-24.04` and `ubuntu-24.04-arm`.
 - macOS Intel/arm64 use `macos-15-intel` and `macos-15`.
-- Windows x64/arm64 use `windows-2025` and `windows-11-arm`.
+- Windows x64/arm64 use `windows-2022` and `windows-11-arm`.
 - In a public repository these standard GitHub-hosted runners are free. “Local
   Bazel” means Bazel runs inside that temporary GitHub VM rather than through
   BuildBuddy remote execution; it never means a maintainer's computer.
