@@ -48,6 +48,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Test fork npm tarballs (no publication)
+        run: python3 -m unittest discover -s scripts -p 'test_fork_npm.py'
+
       - name: Ensure root README.md contains only ASCII and certain Unicode code points
         run: ./scripts/asciicheck.py README.md
       - name: Check root README ToC

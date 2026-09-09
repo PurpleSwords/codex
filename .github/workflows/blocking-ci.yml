@@ -16,10 +16,6 @@ concurrency:
 jobs:
   # Keep reusable workflow calls alphabetized. The `required` job below is the
   # version-controlled list that the main-branch ruleset should require.
-  bazel:
-    name: Bazel
-    uses: ./.github/workflows/bazel.yml
-
   blob-size-policy:
     name: Blob size policy
     uses: ./.github/workflows/blob-size-policy.yml
@@ -36,13 +32,9 @@ jobs:
     name: repo-checks
     uses: ./.github/workflows/repo-checks.yml
 
-  rust-ci:
-    name: rust-ci
-    uses: ./.github/workflows/rust-ci.yml
-
-  sdk:
-    name: sdk
-    uses: ./.github/workflows/sdk.yml
+  fork-checks:
+    name: Fork checks
+    uses: ./.github/workflows/fork-checks.yml
 
   required:
     name: CI required
@@ -50,13 +42,11 @@ jobs:
     # required check can appear successful instead of reporting the failure.
     if: ${{ always() }}
     needs:
-      - bazel
       - blob-size-policy
       - cargo-deny
       - codespell
       - repo-checks
-      - rust-ci
-      - sdk
+      - fork-checks
     runs-on: ubuntu-24.04
     steps:
       # Keep the helper on the same combined revision as the child workflows so

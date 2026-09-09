@@ -10,7 +10,7 @@ on:
       create_github_release:
         description: Create or update a GitHub release after building
         required: true
-        default: true
+        default: false
         type: boolean
       publish_npm:
         description: Publish to npm after building (requires trusted publishing)
@@ -81,11 +81,13 @@ jobs:
           REUSE_RUN_ID: ${{ inputs.reuse_run_id }}
           TARGET_ARTIFACT_RUN_ID: ${{ inputs.target_artifact_run_id }}
           REUSE_RELEASE_ASSETS: ${{ inputs.reuse_release_assets }}
+          CREATE_GITHUB_RELEASE: ${{ inputs.create_github_release }}
+          PUBLISH_NPM: ${{ inputs.publish_npm }}
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
-            echo "Fork releases must be dispatched from the main branch, not $GITHUB_REF" >&2
+          if [[ "$GITHUB_REF" != "refs/heads/main" && ( "$CREATE_GITHUB_RELEASE" == "true" || "$PUBLISH_NPM" == "true" ) ]]; then
+            echo "Publishing must be dispatched from main; other branches may only build artifacts" >&2
             exit 1
           fi
           version="$(python3 scripts/fork_release.py validate-version "$VERSION")"

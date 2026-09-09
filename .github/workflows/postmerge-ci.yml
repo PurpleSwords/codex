@@ -11,21 +11,19 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Keep reusable workflow calls alphabetized. Each child retains its own
-  # workflow_dispatch trigger so maintainers can rerun flaky suites directly.
-  rust-ci-full:
-    name: rust-ci-full
-    uses: ./.github/workflows/rust-ci-full.yml
+  fork-platforms:
+    name: Native Cargo checks
+    uses: ./.github/workflows/fork-platforms.yml
 
-  v8-canary:
-    name: v8-canary
-    uses: ./.github/workflows/v8-canary.yml
+  sdk:
+    name: SDK checks
+    uses: ./.github/workflows/sdk.yml
 
   results:
     name: Fork full CI results
     needs:
-      - rust-ci-full
-      - v8-canary
+      - fork-platforms
+      - sdk
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     steps:

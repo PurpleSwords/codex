@@ -1,53 +1,34 @@
-# Workflow Strategy
+# Fork workflow strategy
 
-The community fork's CI and release workflows use standard GitHub-hosted
-runners throughout. Pull requests and `main` get one review-friendly CI run,
-while the heavyweight full matrix is started manually to avoid duplicate runs
-and notification noise.
+`blocking-ci.yml` is the single automatic entrypoint for PRs targeting main and
+pushes to main. It cancels superseded runs and reports one `CI required` gate.
+The gate evaluates the checked-out PR merge revision.
 
-## Pull Requests
+Automatic coverage:
 
-- Required checks run against GitHub's synthetic merge commit, not the pull
-  request head alone. This includes changes already on `main` and catches
-  conflicts before they reach the branch.
-- `bazel.yml` is the main pre-merge verification path for Rust code.
-  It runs Bazel `test` and Bazel `clippy` on the supported Bazel targets,
-  including the generated Rust test binaries needed to lint inline `#[cfg(test)]`
-  code.
-- `rust-ci.yml` keeps the Cargo-native PR checks intentionally small:
-  - `cargo fmt --check`
-  - `cargo shear`
-  - `argument-comment-lint` on Linux, macOS, and Windows
-  - `tools/argument-comment-lint` package tests when the lint or its workflow wiring changes
+- `fork-checks.yml`: a Linux Cargo build of the CLI and code-mode host, CLI smoke
+  checks, focused prompt-edit/WSL regression tests, and install-context tests.
+  Public checksum-verified V8 artifacts avoid building V8 from source.
+- Repository formatting and boundary checks, package builder tests, and real
+  `npm pack` checks of the fork root package and all six platform fixtures.
+- Dependency policy, spelling, and blob-size checks.
 
-## Full Verification
+This is deliberately scoped coverage. Passing it does not mean the upstream
+full test suite or all release targets passed. The 60-minute Cargo job budget
+must be measured on a cold standard runner; do not extend it to mask failures.
+See `FORK_AUDIT.md` for the validation status and historical failures.
 
-- `bazel.yml` also runs as part of `blocking-ci.yml` on pushes to `main`.
-  Bazel executes directly on the ephemeral GitHub runner and uses GitHub cache;
-  this fork does not require BuildBuddy or self-hosted runners.
-- `rust-ci-full.yml` is the full Cargo-native verification workflow.
-  It is available directly or through the manually dispatched
-  `postmerge-ci.yml`, keeping the heavier checks off the automatic path:
-  - the full Cargo `clippy` matrix
-  - the full Cargo `nextest` matrix via per-platform archive-backed shards
-  - native Windows ARM64 nextest archives and shards
-  - release-profile Cargo builds
-  - cross-platform `argument-comment-lint`
-  - Linux remote-env tests
+`postmerge-ci.yml` is manual and groups `fork-platforms.yml` and `sdk.yml`.
+Native macOS Intel/ARM and Windows x64/ARM use standard GitHub-hosted runners.
+Windows Cargo uses MSVC host/target dependencies; it does not consume Bazel's
+gnullvm outputs. SDK packaging keeps codex and codex-code-mode-host together.
 
-## Rule Of Thumb
+The old `bazel.yml`, `rust-ci.yml`, `rust-ci-full.yml`, and V8 workflows remain
+available for explicit diagnosis. They are not called by the automatic gate.
+Their known failures and long runtimes remain open issues, not ignored passes.
 
-- If a build/test/clippy check can be expressed in Bazel, prefer putting the PR-time version in `bazel.yml`.
-- Keep `rust-ci.yml` fast enough that it usually does not dominate PR latency.
-- Reserve `rust-ci-full.yml` for heavyweight Cargo-native coverage that Bazel does not replace yet.
-
-## Fork runner policy
-
-- Linux x64/arm64 use `ubuntu-24.04` and `ubuntu-24.04-arm`.
-- macOS Intel/arm64 use `macos-15-intel` and `macos-15`.
-- Windows x64/arm64 use `windows-2022` and `windows-11-arm`.
-- In a public repository these standard GitHub-hosted runners are free. “Local
-  Bazel” means Bazel runs inside that temporary GitHub VM rather than through
-  BuildBuddy remote execution; it never means a maintainer's computer.
-- `blocking-ci.yml` cancels superseded runs for the same branch or pull request.
-  `postmerge-ci.yml` is manual and also cancels an older full run for the same ref.
+`fork-release.yml` retains its npm Trusted Publisher filename, OIDC permission,
+provenance, and six-platform package layout. Both publication inputs default to
+false. Build-only checks can run on a repair branch. Publication remains main-only
+and requires explicit user confirmation; a successful build or npm dry-run is
+not release approval.
