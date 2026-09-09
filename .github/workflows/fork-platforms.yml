@@ -1,0 +1,77 @@
+name: fork-platforms
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-platforms-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    name: Cargo ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            target: aarch64-apple-darwin
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+          - runner: windows-2022
+            target: x86_64-pc-windows-msvc
+          - runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+    defaults:
+      run:
+        shell: bash
+        working-directory: codex-rs
+    env:
+      CODEX_REPO_ROOT: ${{ github.workspace }}
+      CARGO_BUILD_JOBS: "2"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Configure short build path
+        run: |
+          echo "CARGO_TARGET_DIR=$RUNNER_TEMP/codex-target" >> "$GITHUB_ENV"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then git config --global core.longpaths true; fi
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+        with:
+          targets: ${{ matrix.target }}
+      - uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532 # v2.62.49
+        with:
+          tool: just@1.51.0,cargo-nextest@0.9.143
+      - uses: facebook/install-dotslash@1e4e7b3e07eaca387acb98f1d4720e0bee8dbb6a # v2
+      - if: runner.os == 'Windows'
+        uses: ./.github/actions/setup-msvc-env
+        with:
+          target: ${{ matrix.target }}
+      - uses: ./.github/actions/setup-rusty-v8
+        with:
+          target: ${{ matrix.target }}
+      - name: Build native CLI and companion host
+        run: cargo build --locked --target '${{ matrix.target }}' --bin codex --bin codex-code-mode-host
+      - name: Test installation and prompt editing
+        run: |
+          just test --locked --target '${{ matrix.target }}' -p codex-install-context
+          just test --locked --target '${{ matrix.target }}' -p codex-tui --lib -E 'test(prompt_edit) | test(backtrack) | test(keyboard_modes) | test(resize_reflow)'
+      - name: Smoke test CLI
+        run: |
+          mkdir -p "$RUNNER_TEMP/codex-smoke-home"
+          export CODEX_HOME="$RUNNER_TEMP/codex-smoke-home"
+          suffix=""
+          if [[ "$RUNNER_OS" == "Windows" ]]; then suffix=".exe"; fi
+          "$CARGO_TARGET_DIR/${{ matrix.target }}/debug/codex$suffix" --version
+          "$CARGO_TARGET_DIR/${{ matrix.target }}/debug/codex$suffix" --help
