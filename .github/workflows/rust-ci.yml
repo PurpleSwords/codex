@@ -3,7 +3,16 @@ on:
   workflow_call:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
+  cargo:
+    name: Cargo build and integration tests
+    uses: ./.github/workflows/fork-checks.yml
+    with:
+      benchmarks: ${{ github.event_name == 'workflow_dispatch' }}
+
   # --- Detect what changed so the fast PR workflow only runs relevant jobs ----
   changed:
     name: Detect changed areas
@@ -59,6 +68,7 @@ jobs:
   # --- Fast Cargo-native PR checks -------------------------------------------
   general:
     name: Format / etc
+    timeout-minutes: 10
     runs-on: ubuntu-24.04
     needs: changed
     if: ${{ needs.changed.outputs.codex == 'true' || needs.changed.outputs.workflows == 'true' }}
@@ -75,8 +85,6 @@ jobs:
           components: rustfmt
       - name: cargo fmt
         run: cargo fmt -- --config imports_granularity=Item --check
-      - name: Rust benchmark smoke test
-        run: just bench-smoke
 
       - name: Check for a clean worktree
         if: always() && !cancelled()
@@ -84,6 +92,7 @@ jobs:
 
   cargo_shear:
     name: cargo shear
+    timeout-minutes: 10
     runs-on: ubuntu-24.04
     needs: changed
     if: ${{ needs.changed.outputs.codex == 'true' || needs.changed.outputs.workflows == 'true' }}
@@ -108,6 +117,7 @@ jobs:
 
   argument_comment_lint_package:
     name: Argument comment lint package
+    timeout-minutes: 30
     runs-on: ubuntu-24.04
     needs: changed
     if: ${{ needs.changed.outputs.argument_comment_lint_package == 'true' }}
@@ -161,65 +171,21 @@ jobs:
         if: always() && !cancelled()
         uses: ./.github/actions/check-clean-worktree
 
+  # The full aspect sweep is retained as an explicit heavy check. It can also
+  # be selected independently in fork-bazel.yml, including native macOS runners.
   argument_comment_lint_prebuilt:
-    name: Argument comment lint - ${{ matrix.name }}
-    runs-on: ${{ matrix.runs_on || matrix.runner }}
-    timeout-minutes: ${{ matrix.timeout_minutes }}
-    needs: changed
-    environment:
-      name: bazel
-      deployment: false
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: Linux
-            runner: ubuntu-24.04
-            timeout_minutes: 30
-          - name: macOS
-            runner: macos-15-xlarge
-            timeout_minutes: 30
-          - name: Windows
-            runner: windows-x64
-            timeout_minutes: 30
-            runs_on:
-              group: ${{ github.event.repository.name }}-runners
-              labels: ${{ github.event.repository.name }}-windows-x64
-    steps:
-      - name: Check whether argument comment lint should run
-        id: argument_comment_lint_gate
-        shell: bash
-        env:
-          ARGUMENT_COMMENT_LINT: ${{ needs.changed.outputs.argument_comment_lint }}
-          WORKFLOWS: ${{ needs.changed.outputs.workflows }}
-        run: |
-          if [[ "$ARGUMENT_COMMENT_LINT" == "true" || "$WORKFLOWS" == "true" ]]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          echo "No argument-comment-lint relevant changes."
-          echo "run=false" >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        if: ${{ steps.argument_comment_lint_gate.outputs.run == 'true' }}
-        with:
-          persist-credentials: false
-      - name: Run argument comment lint on codex-rs via Bazel
-        if: ${{ steps.argument_comment_lint_gate.outputs.run == 'true' }}
-        uses: ./.github/actions/run-argument-comment-lint
-        with:
-          target: ${{ runner.os }}
-          buildbuddy-api-key: ${{ secrets.BUILDBUDDY_API_KEY }}
-
-      - name: Check for a clean worktree
-        if: always() && !cancelled() && steps.argument_comment_lint_gate.outputs.run == 'true'
-        uses: ./.github/actions/check-clean-worktree
+    name: Argument comment lint
+    if: github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/fork-bazel.yml
+    with:
+      check: argument-comment-lint
 
   # --- Gatherer job that you mark as the ONLY required status -----------------
   results:
     name: CI results (required)
     needs:
       [
+        cargo,
         changed,
         general,
         cargo_shear,
@@ -237,8 +203,11 @@ jobs:
           echo "general: ${{ needs.general.result }}"
           echo "shear  : ${{ needs.cargo_shear.result }}"
 
-          # If nothing relevant changed (PR touching only root README, etc.),
-          # declare success regardless of other jobs.
+          [[ '${{ needs.cargo.result }}' == 'success' ]] || { echo 'Cargo baseline failed'; exit 1; }
+          [[ '${{ needs.changed.result }}' == 'success' ]] || { echo 'Change detection failed'; exit 1; }
+
+          # Once the unconditional Cargo baseline and detection pass, no other
+          # conditional Rust checks are required for unrelated changes.
           if [[ "${NEEDS_CHANGED_OUTPUTS_ARGUMENT_COMMENT_LINT}" != 'true' && "${NEEDS_CHANGED_OUTPUTS_CODEX}" != 'true' && "${NEEDS_CHANGED_OUTPUTS_WORKFLOWS}" != 'true' ]]; then
             echo 'No relevant changes -> CI not required.'
             exit 0
@@ -248,7 +217,7 @@ jobs:
             [[ '${{ needs.argument_comment_lint_package.result }}' == 'success' ]] || { echo 'argument_comment_lint_package failed'; exit 1; }
           fi
 
-          if [[ "${NEEDS_CHANGED_OUTPUTS_ARGUMENT_COMMENT_LINT}" == 'true' || "${NEEDS_CHANGED_OUTPUTS_WORKFLOWS}" == 'true' ]]; then
+          if [[ "$GITHUB_EVENT_NAME" == 'workflow_dispatch' ]]; then
             [[ '${{ needs.argument_comment_lint_prebuilt.result }}' == 'success' ]] || { echo 'argument_comment_lint_prebuilt failed'; exit 1; }
           fi
 

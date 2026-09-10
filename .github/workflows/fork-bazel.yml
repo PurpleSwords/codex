@@ -1,0 +1,103 @@
+name: Public Bazel checks
+
+on:
+  workflow_call:
+    inputs:
+      check:
+        type: string
+        default: smoke
+  workflow_dispatch:
+    inputs:
+      check:
+        type: choice
+        default: smoke
+        options: [smoke, tests, clippy, release-build, argument-comment-lint]
+      runner:
+        type: choice
+        default: ubuntu-24.04
+        options: [ubuntu-24.04, macos-15, macos-15-intel]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: public-bazel-${{ github.event.pull_request.number || github.ref }}-${{ inputs.check }}-${{ inputs.runner || 'ubuntu-24.04' }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Bazel ${{ inputs.check }} (local execution)
+    runs-on: ${{ inputs.runner || 'ubuntu-24.04' }}
+    timeout-minutes: ${{ inputs.check == 'smoke' && 30 || 60 }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-ci
+      - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
+      - name: Cache downloaded archives and local action outputs
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          # Do not cache repository contents: LLVM overlays contain absolute
+          # symlinks into the output base. Each job gets a fresh contents cache.
+          path: |
+            ~/.cache/bazel-disk-cache
+            ${{ env.BAZEL_REPOSITORY_CACHE }}
+          key: public-bazel-${{ runner.os }}-${{ runner.arch }}-${{ inputs.check }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', '.bazelrc') }}-${{ github.sha }}
+          restore-keys: |
+            public-bazel-${{ runner.os }}-${{ runner.arch }}-${{ inputs.check }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', '.bazelrc') }}-
+      - name: Install native Linux dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends pkg-config libcap-dev
+      - name: Check locked dependencies and V8 checksums
+        run: |
+          bazel --output_base="$BAZEL_OUTPUT_BASE" mod deps --lockfile_mode=error --repo_contents_cache="$BAZEL_REPO_CONTENTS_CACHE" --repository_cache="$BAZEL_REPOSITORY_CACHE"
+          python3 .github/scripts/rusty_v8_bazel.py check-module-bazel
+          just test-github-scripts
+      - name: Run selected Bazel check
+        shell: bash
+        env:
+          BAZEL_CHECK: ${{ inputs.check }}
+        run: |
+          set -euo pipefail
+          # Do not select ci-linux or any buildbuddy/RBE config. Keep a local
+          # disk cache and bound concurrency to ordinary hosted-runner resources.
+          bazel_cmd=(bazel --output_base="$BAZEL_OUTPUT_BASE")
+          local_args=(--repo_contents_cache="$BAZEL_REPO_CONTENTS_CACHE" --repository_cache="$BAZEL_REPOSITORY_CACHE" --jobs=2 --local_test_jobs=2 --remote_executor= --remote_cache= --bes_backend= --experimental_remote_downloader=)
+          case "$BAZEL_CHECK" in
+            smoke)
+              "${bazel_cmd[@]}" test "${local_args[@]}" //codex-rs/ansi-escape:all //codex-rs/utils/absolute-path:all
+              ;;
+            tests)
+              "${bazel_cmd[@]}" test "${local_args[@]}" --keep_going --test_tag_filters=-argument-comment-lint -- //... -//third_party/v8:all -//codex-rs/v8-poc:v8-poc-unit-tests
+              ;;
+            clippy|release-build|argument-comment-lint)
+              case "$BAZEL_CHECK" in
+                clippy)
+                  target_lines="$(bash scripts/list-bazel-clippy-targets.sh)"
+                  flags=(--config=clippy)
+                  ;;
+                release-build)
+                  target_lines="$(bash scripts/list-bazel-release-targets.sh)"
+                  flags=(--compilation_mode=fastbuild --@rules_rust//rust/settings:extra_rustc_flag=-Cdebug-assertions=no --@rules_rust//rust/settings:extra_exec_rustc_flag=-Cdebug-assertions=no)
+                  ;;
+                argument-comment-lint)
+                  target_lines="$(bash tools/argument-comment-lint/list-bazel-targets.sh)"
+                  flags=(--config=argument-comment-lint)
+                  ;;
+              esac
+              targets=()
+              while IFS= read -r target; do
+                [[ -z "$target" ]] || targets+=("$target")
+              done <<< "$target_lines"
+              [[ ${#targets[@]} -gt 0 ]]
+              "${bazel_cmd[@]}" build "${local_args[@]}" --keep_going "${flags[@]}" -- "${targets[@]}"
+              if [[ "$BAZEL_CHECK" == release-build && "$RUNNER_OS" == Linux ]]; then
+                "${bazel_cmd[@]}" build "${local_args[@]}" //codex-rs/bwrap:bwrap
+              fi
+              ;;
+            *) echo "Unknown Bazel check: $BAZEL_CHECK" >&2; exit 2 ;;
+          esac
+      - name: Check for a clean worktree
+        if: always() && !cancelled()
+        uses: ./.github/actions/check-clean-worktree
