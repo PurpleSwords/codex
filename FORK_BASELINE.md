@@ -5,23 +5,24 @@ The rebuild starts at upstream tag `rust-v0.153.4`, commit
 
 - Local `main` points to the unmodified official release.
 - `archive/main-before-01534` preserves the previous fork at `c68c0d64b8`.
-- Commits on `ci/official-01534` are restricted to CI and this maintenance record.
-  Local source, test, formatter and lockfile edits are deliberately uncommitted.
+- Commits on `ci/official-01534` cover CI, the approved lockfile version alignment
+  and this maintenance record. Local source, test and formatter edits remain
+  deliberately uncommitted.
 - Remote `main` has not been replaced. Replacing its history requires approval.
 
 The previously published fork package `0.153.4` was based on a different upstream
 revision. Its successful publication is not evidence that this baseline passes.
 That npm version is already used and must never be published again.
 
-## Paused build metadata correction
+## Approved build metadata correction
 
 The official release commit changes the workspace version to `0.153.4` but leaves
 149 local package versions at `0.0.0` in `Cargo.lock`. Consequently, Cargo rejects
 `--locked` before running tests. The lockfile correction changes only those local
 versions, without upgrading external dependencies. Keep `--locked` in CI.
-This correction is local only, pending approval to resume non-CI changes. A
-CI-only checkout therefore still fails its locked Cargo build; do not regenerate
-the lockfile inside CI to hide the mismatch.
+The owner approved committing this correction separately to the CI branch after
+the hosted probe reproduced the mismatch. Do not regenerate the lockfile inside
+CI to hide future drift. This approval does not include source or test fixes.
 
 ## Automatic checks
 
@@ -97,7 +98,7 @@ contents cache must not be shared between output bases.
 
 ## Local evidence so far
 
-These measurements include the uncommitted lockfile/formatter corrections where
+These measurements include the lockfile and local formatter corrections where
 needed. They are not results for a clean CI-only checkout or a hosted CI run.
 
 - Official client integration module: 47 passed, 1596 other tests excluded by the
@@ -176,8 +177,8 @@ confirmed the following before all jobs completed:
 
 The verifier correction passes locally against all workspace manifests, and the
 spelling correction passes a targeted codespell check. Neither requires a Rust
-source, Cargo manifest or lockfile change. The blocking lockfile correction remains
-outside the CI-only commits until separately approved.
+source, Cargo manifest or lockfile change. The blocking lockfile correction was
+subsequently approved as a separate build-metadata commit for hosted validation.
 
 ## Migration gates
 
