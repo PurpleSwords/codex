@@ -32,7 +32,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup-ci
       - name: Install native dependencies
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends pkg-config libcap-dev
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends pkg-config libcap-dev strace
       - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
       - uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532 # v2.62.49
         with:
@@ -71,6 +71,17 @@ jobs:
           retention-days: 1
       # Independent suites should still report failures after an earlier suite
       # fails. None of these conditions changes the failing job's conclusion.
+      - name: Diagnose restricted sandbox startup
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: bash ../.github/scripts/sandbox-preflight.sh
+      - name: Upload sandbox diagnostics
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: linux-sandbox-diagnostics
+          path: ${{ runner.temp }}/sandbox-diagnostics/*.*
+          if-no-files-found: error
+          retention-days: 3
       - name: Test core integration suite including Responses
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: just test --locked -p codex-core --test all
