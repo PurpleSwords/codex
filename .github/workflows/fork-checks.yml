@@ -1,0 +1,126 @@
+name: fork-checks
+
+on:
+  workflow_call:
+    inputs:
+      benchmarks:
+        type: boolean
+        default: false
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux build and baseline tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: codex-rs
+    env:
+      CODEX_REPO_ROOT: ${{ github.workspace }}
+      CARGO_BUILD_JOBS: "2"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-ci
+      - name: Install native dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends pkg-config libcap-dev strace
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+      - uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532 # v2.62.49
+        with:
+          tool: cargo-nextest@0.9.143
+      - uses: ./.github/actions/setup-rusty-v8
+        with:
+          target: x86_64-unknown-linux-gnu
+      - name: Cache Cargo downloads and build outputs
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ${{ env.CARGO_TARGET_DIR }}
+          key: official-01534-linux-v1-${{ hashFiles('codex-rs/Cargo.lock', 'codex-rs/rust-toolchain.toml') }}-${{ github.sha }}
+          restore-keys: |
+            official-01534-linux-v1-${{ hashFiles('codex-rs/Cargo.lock', 'codex-rs/rust-toolchain.toml') }}-
+      - name: Build workspace binaries including runtime test helpers
+        id: build
+        run: |
+          cargo build --locked --workspace --bins
+          # Test executables live in debug/deps and cannot discover debug/bwrap.
+          # Stage the same Cargo-built binary in their supported resource layout.
+          install -D -m 755 "$CARGO_TARGET_DIR/debug/bwrap" \
+            "$CARGO_TARGET_DIR/debug/codex-resources/bwrap"
+          cmp "$CARGO_TARGET_DIR/debug/bwrap" "$CARGO_TARGET_DIR/debug/codex-resources/bwrap"
+      - name: Smoke test CLI with an isolated home
+        run: |
+          mkdir -p "$RUNNER_TEMP/codex-smoke-home"
+          export CODEX_HOME="$RUNNER_TEMP/codex-smoke-home"
+          "$CARGO_TARGET_DIR/debug/codex" --version
+          "$CARGO_TARGET_DIR/debug/codex" --help
+      - name: Share CLI and companion with SDK checks
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: linux-sdk-binaries
+          path: |
+            ${{ env.CARGO_TARGET_DIR }}/debug/codex
+            ${{ env.CARGO_TARGET_DIR }}/debug/codex-code-mode-host
+          if-no-files-found: error
+          retention-days: 1
+      # Independent suites should still report failures after an earlier suite
+      # fails. None of these conditions changes the failing job's conclusion.
+      - name: Diagnose restricted sandbox startup
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: bash ../.github/scripts/sandbox-preflight.sh
+      - name: Upload sandbox diagnostics
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: linux-sandbox-diagnostics
+          path: ${{ runner.temp }}/sandbox-diagnostics/*.*
+          if-no-files-found: error
+          retention-days: 3
+      - name: Test core integration suite including Responses
+        id: core_tests
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: just test --locked -p codex-core --test all
+      - name: Trace the failing filesystem helper test
+        if: ${{ !cancelled() && steps.core_tests.outcome == 'failure' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/core-sandbox-trace"
+          # Diagnostic reproduction only: the original suite remains failed,
+          # even if tracing changes timing and this isolated test passes.
+          timeout --kill-after=10s 120s strace -f -s 256 \
+            -e trace=process,file,prctl,unshare,setns,seccomp \
+            -o "$RUNNER_TEMP/core-sandbox-trace/agents-md.strace" \
+            just test --locked -p codex-core --test all \
+            -E 'test(=suite::agents_md::restricted_project_without_instructions_starts_successfully)' \
+            --test-threads=1 --retries=0
+      - name: Upload filesystem helper trace
+        if: ${{ !cancelled() && steps.core_tests.outcome == 'failure' }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: core-sandbox-trace
+          path: ${{ runner.temp }}/core-sandbox-trace/*.strace
+          if-no-files-found: error
+          retention-days: 3
+      - name: Test TUI library
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: just test --locked -p codex-tui --lib
+      - name: Test installation context
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: just test --locked -p codex-install-context
+      - name: Rust benchmark smoke test
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && inputs.benchmarks }}
+        run: just bench-smoke
+      - name: Check for a clean worktree
+        if: always() && !cancelled()
+        uses: ./.github/actions/check-clean-worktree

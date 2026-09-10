@@ -7,43 +7,47 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: blocking-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # Keep reusable workflow calls alphabetized. The `required` job below is the
   # version-controlled list that the main-branch ruleset should require.
   bazel:
     name: Bazel
-    uses: ./.github/workflows/bazel.yml
-    secrets: inherit
+    uses: ./.github/workflows/fork-bazel.yml
 
   blob-size-policy:
     name: Blob size policy
     uses: ./.github/workflows/blob-size-policy.yml
-    secrets: inherit
 
   cargo-deny:
     name: cargo-deny
     uses: ./.github/workflows/cargo-deny.yml
-    secrets: inherit
 
   codespell:
     name: Codespell
     uses: ./.github/workflows/codespell.yml
-    secrets: inherit
 
   repo-checks:
     name: repo-checks
     uses: ./.github/workflows/repo-checks.yml
-    secrets: inherit
 
   rust-ci:
     name: rust-ci
     uses: ./.github/workflows/rust-ci.yml
-    secrets: inherit
 
   sdk:
-    name: sdk
+    name: SDK
+    needs: rust-ci
+    # A test/lint failure must not suppress independent SDK results. If the
+    # build failed, the missing artifact is reported by the TypeScript job.
+    if: ${{ !cancelled() }}
     uses: ./.github/workflows/sdk.yml
-    secrets: inherit
 
   required:
     name: CI required
