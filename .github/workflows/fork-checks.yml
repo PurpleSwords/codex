@@ -52,7 +52,13 @@ jobs:
             official-01534-linux-v1-${{ hashFiles('codex-rs/Cargo.lock', 'codex-rs/rust-toolchain.toml') }}-
       - name: Build workspace binaries including runtime test helpers
         id: build
-        run: cargo build --locked --workspace --bins
+        run: |
+          cargo build --locked --workspace --bins
+          # Test executables live in debug/deps and cannot discover debug/bwrap.
+          # Stage the same Cargo-built binary in their supported resource layout.
+          install -D -m 755 "$CARGO_TARGET_DIR/debug/bwrap" \
+            "$CARGO_TARGET_DIR/debug/codex-resources/bwrap"
+          cmp "$CARGO_TARGET_DIR/debug/bwrap" "$CARGO_TARGET_DIR/debug/codex-resources/bwrap"
       - name: Smoke test CLI with an isolated home
         run: |
           mkdir -p "$RUNNER_TEMP/codex-smoke-home"

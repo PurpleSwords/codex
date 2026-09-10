@@ -25,7 +25,7 @@ TypeScript SDK, Bazel smoke, repo checks, Cargo deny/shear, formatting, spelling
 and argument-comment lint package tests passed. Passing Bazel smoke does not
 establish full Bazel or cross-platform coverage.
 
-## A. Restricted Linux sandbox abort — classification pending
+## A. Restricted Linux sandbox abort — CI resource-layout defect identified
 
 Representative evidence in job `102849560149`:
 
@@ -73,6 +73,28 @@ Next decision: identify the executable and syscall immediately preceding abort.
 Only alter CI dependencies/environment if that trace establishes the cause. If it
 identifies a source defect, add the evidence here and leave the code unchanged.
 Do not classify all 78 core failures as one cause before this comparison.
+
+Update from [run 34479401425](https://github.com/PurpleSwords/codex/actions/runs/34479401425):
+the exact-test trace now identifies a concrete CI layout defect. In artifact
+`core-sandbox-trace`, `agents-md.strace:66270` identifies process 214930's executable
+as `cargo-target/debug/deps/all-11afbd0adb5ffdbe`. Lines 66369–66376 show all bundled
+bwrap candidates missing: `debug/deps/codex-resources/bwrap`,
+`debug/codex-resources/bwrap`, and `debug/deps/bwrap`. System PATH lookup also
+finds no bwrap. Line 67226 records this process sending itself SIGABRT.
+
+The lookup at `linux-sandbox/src/bundled_bwrap.rs:94` explains the distinction:
+bare bwrap is searched next to the executable, while the parent is searched only
+for `codex-resources/bwrap`. Cargo builds `debug/bwrap`, which works for the CLI
+at `debug/codex` but is not a candidate for a test executable under `debug/deps`.
+`linux-sandbox/src/launcher.rs:50` panics when no launcher is available. The trace
+does not establish the precise panic-to-abort mechanism, which remains a separate
+source diagnostic concern; it does establish missing launcher discovery.
+
+CI repair: after the workspace build, install its exact bwrap binary at
+`debug/codex-resources/bwrap` and compare the bytes. This follows the existing
+lookup contract, does not alter source or test assertions, and does not replace
+the vendored tool with an unrelated system version. Await the hosted result to
+measure which failures disappear; do not assume every core failure is resolved.
 
 ## B. Python SDK formatter contract — source/tooling mismatch, paused
 
