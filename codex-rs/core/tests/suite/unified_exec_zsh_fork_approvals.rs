@@ -101,33 +101,8 @@ async fn unified_exec_zsh_fork_parent_approval_preserves_denied_reads() -> Resul
     )
     .await?;
     approve_expected_exec(&test, &command).await?;
-    // Denied reads keep the profile restricted, so RequireEscalated still
-    // prompts for the intercepted execve. Even approving that child must not
-    // remove the denied-read entry from its execution sandbox.
-    let event = wait_for_event(&test.codex, |event| {
-        matches!(
-            event,
-            EventMsg::ExecApprovalRequest(_) | EventMsg::TurnComplete(_)
-        )
-    })
-    .await;
-    let EventMsg::ExecApprovalRequest(approval) = event else {
-        anyhow::bail!("expected intercepted cat approval before completion");
-    };
-    let program = approval.command.first().context("expected executable")?;
-    assert_eq!(
-        (
-            Path::new(program).file_name(),
-            &approval.command[1..],
-            approval.call_id.as_str(),
-        ),
-        (
-            Some(std::ffi::OsStr::new("cat")),
-            [denied_path.to_string_lossy().into_owned()].as_slice(),
-            call_id,
-        )
-    );
-    approve_exec(&test, approval.effective_approval_id()).await?;
+    // Parent approval covers this execution request, but must not remove the
+    // denied-read entry from the sandbox or prompt again for the same request.
     wait_for_completion_without_approval(&test).await;
 
     let result = command_result(&results, call_id);
