@@ -125,7 +125,7 @@ needed. They are not results for a clean CI-only checkout or a hosted CI run.
 - The TUI/installation-context library run completed with failures, including
   pending TUI snapshots. These snapshots have not been accepted; source/test work
   is paused. Do not describe the Rust baseline as passing.
-- No hosted run has validated this draft yet. No product patches were migrated.
+- Hosted validation has started, but has not passed. No product patches were migrated.
 - Public Bazel smoke: both test targets passed in 183.942 seconds with two local
   execution slots and 1681 actions. A fresh output base and repository-contents
   cache were used, but existing archive/action caches were available; this is not
@@ -156,6 +156,28 @@ The release commit's [release run 33926543788](https://github.com/openai/codex/a
 also ended in failure (winget), despite successful build/npm jobs. This establishes
 an identifiable official baseline, not an all-green baseline. It does not establish
 that every failure in the old fork or the local host has the same cause.
+
+## CI-only hosted probe
+
+[PR 2](https://github.com/PurpleSwords/codex/pull/2) targets the separate official
+baseline branch, not the old remote main. Its initial
+[run 34468608276](https://github.com/PurpleSwords/codex/actions/runs/34468608276)
+confirmed the following before all jobs completed:
+
+- Locked Cargo build and Bazel dependency loading fail on the official lockfile
+  version mismatch. Cargo deny and shear complete their main checks, but modify
+  that lockfile and correctly fail the clean-worktree gate.
+- Repository checks find a stale code-mode feature exception in the CI manifest
+  verifier. Remove that exception, not the verifier or the crate's lint policy.
+- Codespell mistakes the valid Rust flag `OFlags::WRONLY` for a spelling error.
+  Add only `wronly` to the existing word allowlist; keep source files checked.
+- Rust formatting, changed-area detection and blob policy passed. This is not an
+  all-green run, and the build failure prevents runtime coverage.
+
+The verifier correction passes locally against all workspace manifests, and the
+spelling correction passes a targeted codespell check. Neither requires a Rust
+source, Cargo manifest or lockfile change. The blocking lockfile correction remains
+outside the CI-only commits until separately approved.
 
 ## Migration gates
 
