@@ -6,6 +6,7 @@
 mod fs;
 mod history;
 mod models;
+mod prompt_edit;
 mod rollout_history;
 
 pub(crate) use history::HISTORY_ITEM_PAGE_LIMIT;
