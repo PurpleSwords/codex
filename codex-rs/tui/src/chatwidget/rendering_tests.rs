@@ -161,8 +161,8 @@ async fn initial_session_header_starts_at_the_top_of_the_viewport() {
                 .to_string()
         })
         .collect::<Vec<_>>()
-        .join("\n")
-        .replace(crate::version::CODEX_CLI_VERSION, "<VERSION>");
+        .join("\n");
+    let header = crate::test_support::normalize_cli_version(&header).replace("0.0.0", "<VERSION>");
 
     let cwd = widget.config.cwd.as_path().display().to_string();
     let normalized_cwd = format!("{:<width$}", "/tmp/project", width = cwd.len());

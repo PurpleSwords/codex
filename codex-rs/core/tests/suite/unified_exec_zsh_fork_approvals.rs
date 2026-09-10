@@ -26,6 +26,7 @@ use codex_protocol::protocol::Op;
 use codex_protocol::protocol::ReviewDecision;
 use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::user_input::UserInput;
+use codex_utils_absolute_path::AbsolutePathBuf;
 use core_test_support::responses::ResponseMock;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
@@ -100,6 +101,8 @@ async fn unified_exec_zsh_fork_parent_approval_preserves_denied_reads() -> Resul
     )
     .await?;
     approve_expected_exec(&test, &command).await?;
+    // Parent approval covers this execution request, but must not remove the
+    // denied-read entry from the sandbox or prompt again for the same request.
     wait_for_completion_without_approval(&test).await;
 
     let result = command_result(&results, call_id);
@@ -107,6 +110,12 @@ async fn unified_exec_zsh_fork_parent_approval_preserves_denied_reads() -> Resul
         result.exit_code.unwrap_or(0),
         0,
         "denied-read command should stay sandboxed after parent approval"
+    );
+    assert!(
+        result.stdout.contains("Permission denied")
+            || result.stdout.contains("Operation not permitted"),
+        "expected filesystem denial rather than a command-start failure: {}",
+        result.stdout
     );
     assert!(
         !result.stdout.contains(secret),
@@ -700,9 +709,9 @@ fn permission_profile_from_toml(profile: &str) -> Result<PermissionProfile> {
                 ":project_roots" => FileSystemPath::Special {
                     value: FileSystemSpecialPath::project_roots(/*subpath*/ None),
                 },
-                _ if *access == FileSystemAccessMode::Deny => FileSystemPath::GlobPattern {
-                    pattern: path.clone(),
-                },
+                _ if *access == FileSystemAccessMode::Deny => {
+                    AbsolutePathBuf::from_absolute_path(path)?.into()
+                }
                 _ => anyhow::bail!("unexpected filesystem entry in test profile: {path}"),
             };
             Ok(FileSystemSandboxEntry {

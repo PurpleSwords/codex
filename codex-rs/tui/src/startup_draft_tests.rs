@@ -104,8 +104,9 @@ fn startup_draft_renders_full_empty_and_multiline_composer_frames() {
                     .to_string()
             })
             .collect::<Vec<_>>()
-            .join("\n")
-            .replace(crate::version::CODEX_CLI_VERSION, "<VERSION>");
+            .join("\n");
+        let frame =
+            crate::test_support::normalize_cli_version(&frame).replace("0.0.0", "<VERSION>");
 
         assert!(
             cursor.1 >= pump.header.desired_height(width),
@@ -140,9 +141,10 @@ async fn startup_draft_clears_loading_status_when_starting_fresh() {
                     .trim_end()
                     .to_string()
             })
+            .map(|line| crate::test_support::normalize_cli_version(&line))
             .collect::<Vec<_>>()
             .join("\n")
-            .replace(crate::version::CODEX_CLI_VERSION, "<VERSION>")
+            .replace("0.0.0", "<VERSION>")
     };
 
     for (label, initial_screen, session_action) in [
@@ -693,8 +695,9 @@ async fn startup_draft_waits_for_onboarding_before_accepting_input() {
                 .to_string()
         })
         .collect::<Vec<_>>()
-        .join("\n")
-        .replace(crate::version::CODEX_CLI_VERSION, "<VERSION>");
+        .join("\n");
+    let visible_frame =
+        crate::test_support::normalize_cli_version(&visible_frame).replace("0.0.0", "<VERSION>");
     drop(renderable);
     frames.push_str(&format!("\n---\nafter onboarding:\n{visible_frame}"));
     insta::assert_snapshot!("startup_draft_onboarding_transition", frames);

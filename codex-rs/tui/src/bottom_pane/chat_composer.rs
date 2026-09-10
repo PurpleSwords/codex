@@ -5357,6 +5357,13 @@ mod tests {
         terminal
             .draw(|f| composer.render(f.area(), f.buffer_mut()))
             .unwrap();
+        // WSL deliberately shows Ctrl+Alt+V rather than Ctrl+V. Keep both
+        // platform expectations instead of depending on the snapshot author's host.
+        let name = if footer_props.is_wsl {
+            format!("{name}_wsl")
+        } else {
+            name.to_string()
+        };
         insta::assert_snapshot!(name, terminal.backend());
     }
 
