@@ -144,6 +144,46 @@ issue, not a reason to disable Clippy.
 
 ## Handoff boundary
 
+### Resource-layout repair verified: run 34482921222
+
+[Run 34482921222](https://github.com/PurpleSwords/codex/actions/runs/34482921222)
+at `2e9b66b512` reduced the core result to **1632 passed / 3 failed / 8 skipped**
+(2 retry passes). No SIGABRT appears in the Cargo job log. The exact AGENTS.md
+diagnostic test passes as well. This verifies the CI resource-layout repair;
+the full workflow is still red. TUI remains 4048 passed / 28 failed / 2 skipped,
+and installation context remains 16 passed. Python SDK still fails its formatter
+contract test; TypeScript SDK and Bazel smoke pass.
+
+The remaining three core failures are now attributable to test/code contracts:
+
+1. `hooks::async_hook_finishing_while_idle_waits_for_the_next_turn::user_turn`:
+   the previously diagnosed async fixture release-gate race; both cloud attempts
+   time out waiting for the next turn. Keep the earlier local correction paused.
+2. `skill_approval::shell_zsh_fork_skill_scripts_ignore_declared_permissions`:
+   `skill_approval.rs:119` waits for either ExecApprovalRequest or TurnComplete;
+   receiving TurnComplete consumes it and returns None. At lines 207–213 the test
+   asserts that result is None and then calls `wait_for_turn_complete` again.
+   With a normal no-approval completion there is no second event to receive. The
+   cloud reports `core/tests/common/lib.rs:354`, `timeout waiting for event` on
+   both attempts. Proposed later repair: make the test wait once for completion
+   while asserting that no approval was requested; retain output/write-denial
+   assertions. Do not raise the timeout or change the approval implementation.
+3. `unified_exec_zsh_fork_approvals::unified_exec_zsh_fork_parent_approval_preserves_denied_reads`:
+   the test creates a concrete `secret.env` path at lines 61–65. Its custom profile
+   conversion at lines 703–705 wraps every deny entry in `FileSystemPath::GlobPattern`,
+   even when the path contains no glob metacharacters. The Linux splitter at
+   `linux-sandbox/src/bwrap.rs:754–756` returns None when no metacharacter exists;
+   the caller at lines 712–715 reports an unsafe/unexpandable glob. The logged path
+   has a non-root prefix but no wildcard, matching this branch exactly. This is
+   not a runner permissions error or evidence of a successful denied read.
+   Proposed later repair: use the production path conversion contract for literal
+   deny paths in this test; separately decide whether literal GlobPattern inputs
+   should be supported by the runtime. Do not change the CI checkout directory.
+
+No new CI fix is justified by these three remaining failures. The code/test
+repairs remain paused under the owner's instruction. This conclusion concerns
+the diagnosed automatic run, not yet-unvalidated heavy Windows/musl/macOS lanes.
+
 Follow-up [run 34475507840](https://github.com/PurpleSwords/codex/actions/runs/34475507840)
 at `bcb66dc439` completed with core 1558 passed / 77 failed / 8 skipped, TUI
 4048 passed / 28 failed / 2 skipped, and installation context 16 passed.
