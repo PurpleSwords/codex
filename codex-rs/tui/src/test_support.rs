@@ -22,6 +22,44 @@ pub(crate) fn test_path_display(path: &str) -> String {
     test_path_buf(path).display().to_string()
 }
 
+/// Stabilize version text in rendered snapshot headers without changing their
+/// width, other content, or the version used by production code.
+pub(crate) fn normalize_cli_version(text: &str) -> String {
+    normalize_version(text, crate::version::CODEX_CLI_VERSION)
+}
+
+fn normalize_version(text: &str, version: &str) -> String {
+    text.split('\n')
+        .map(|line| {
+            let header = format!("OpenAI Codex (v{version})");
+            let update = format!("Update available! {version} ->");
+            let replacement = if line.contains(&header) {
+                line.replacen(&header, "OpenAI Codex (v0.0.0)", 1)
+            } else if line.contains(&update) {
+                line.replacen(&update, "Update available! 0.0.0 ->", 1)
+            } else {
+                return line.to_string();
+            };
+            let Some((content, suffix)) = replacement.rsplit_once('│') else {
+                return replacement;
+            };
+            let trimmed = content.trim_end_matches(' ');
+            let Some(padding) =
+                (content.len() - trimmed.len() + version.len()).checked_sub("0.0.0".len())
+            else {
+                // Do not hide wrapping/truncation changes when the fixture
+                // version would no longer fit inside the rendered border.
+                return line.to_string();
+            };
+            format!("{trimmed}{}│{suffix}", " ".repeat(padding))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[path = "test_support_tests.rs"]
+mod tests;
+
 pub(crate) fn session_source_cli<T>() -> T
 where
     T: DeserializeOwned,

@@ -204,13 +204,12 @@ async fn shell_zsh_fork_skill_scripts_ignore_declared_permissions() -> Result<()
     )
     .await?;
 
+    // None means the helper already consumed TurnComplete.
     let approval = wait_for_exec_approval_request(&test).await;
     assert!(
         approval.is_none(),
         "expected skill script execution to skip the removed skill approval path"
     );
-
-    wait_for_turn_complete(&test).await;
 
     let call_output = mocks
         .completion

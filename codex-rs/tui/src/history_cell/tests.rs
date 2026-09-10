@@ -158,6 +158,7 @@ fn render_lines(lines: &[Line<'static>]) -> Vec<String> {
                 .map(|span| span.content.as_ref())
                 .collect::<String>()
         })
+        .map(|line| crate::test_support::normalize_cli_version(&line))
         .collect()
 }
 

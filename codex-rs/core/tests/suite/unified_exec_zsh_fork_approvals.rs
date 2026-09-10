@@ -26,6 +26,7 @@ use codex_protocol::protocol::Op;
 use codex_protocol::protocol::ReviewDecision;
 use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::user_input::UserInput;
+use codex_utils_absolute_path::AbsolutePathBuf;
 use core_test_support::responses::ResponseMock;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
@@ -100,6 +101,33 @@ async fn unified_exec_zsh_fork_parent_approval_preserves_denied_reads() -> Resul
     )
     .await?;
     approve_expected_exec(&test, &command).await?;
+    // Denied reads keep the profile restricted, so RequireEscalated still
+    // prompts for the intercepted execve. Even approving that child must not
+    // remove the denied-read entry from its execution sandbox.
+    let event = wait_for_event(&test.codex, |event| {
+        matches!(
+            event,
+            EventMsg::ExecApprovalRequest(_) | EventMsg::TurnComplete(_)
+        )
+    })
+    .await;
+    let EventMsg::ExecApprovalRequest(approval) = event else {
+        anyhow::bail!("expected intercepted cat approval before completion");
+    };
+    let program = approval.command.first().context("expected executable")?;
+    assert_eq!(
+        (
+            Path::new(program).file_name(),
+            &approval.command[1..],
+            approval.call_id.as_str(),
+        ),
+        (
+            Some(std::ffi::OsStr::new("cat")),
+            [denied_path.to_string_lossy().into_owned()].as_slice(),
+            call_id,
+        )
+    );
+    approve_exec(&test, approval.effective_approval_id()).await?;
     wait_for_completion_without_approval(&test).await;
 
     let result = command_result(&results, call_id);
@@ -107,6 +135,12 @@ async fn unified_exec_zsh_fork_parent_approval_preserves_denied_reads() -> Resul
         result.exit_code.unwrap_or(0),
         0,
         "denied-read command should stay sandboxed after parent approval"
+    );
+    assert!(
+        result.stdout.contains("Permission denied")
+            || result.stdout.contains("Operation not permitted"),
+        "expected filesystem denial rather than a command-start failure: {}",
+        result.stdout
     );
     assert!(
         !result.stdout.contains(secret),
@@ -700,9 +734,9 @@ fn permission_profile_from_toml(profile: &str) -> Result<PermissionProfile> {
                 ":project_roots" => FileSystemPath::Special {
                     value: FileSystemSpecialPath::project_roots(/*subpath*/ None),
                 },
-                _ if *access == FileSystemAccessMode::Deny => FileSystemPath::GlobPattern {
-                    pattern: path.clone(),
-                },
+                _ if *access == FileSystemAccessMode::Deny => {
+                    AbsolutePathBuf::from_absolute_path(path)?.into()
+                }
                 _ => anyhow::bail!("unexpected filesystem entry in test profile: {path}"),
             };
             Ok(FileSystemSandboxEntry {
