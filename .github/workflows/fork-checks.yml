@@ -83,8 +83,29 @@ jobs:
           if-no-files-found: error
           retention-days: 3
       - name: Test core integration suite including Responses
+        id: core_tests
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: just test --locked -p codex-core --test all
+      - name: Trace the failing filesystem helper test
+        if: ${{ !cancelled() && steps.core_tests.outcome == 'failure' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/core-sandbox-trace"
+          # Diagnostic reproduction only: the original suite remains failed,
+          # even if tracing changes timing and this isolated test passes.
+          timeout --kill-after=10s 120s strace -f -s 256 \
+            -e trace=process,file,prctl,unshare,setns,seccomp \
+            -o "$RUNNER_TEMP/core-sandbox-trace/agents-md.strace" \
+            just test --locked -p codex-core --test all \
+            -E 'test(=suite::agents_md::restricted_project_without_instructions_starts_successfully)' \
+            --test-threads=1 --retries=0
+      - name: Upload filesystem helper trace
+        if: ${{ !cancelled() && steps.core_tests.outcome == 'failure' }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: core-sandbox-trace
+          path: ${{ runner.temp }}/core-sandbox-trace/*.strace
+          if-no-files-found: error
+          retention-days: 3
       - name: Test TUI library
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: just test --locked -p codex-tui --lib

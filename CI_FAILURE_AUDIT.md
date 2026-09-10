@@ -122,6 +122,22 @@ issue, not a reason to disable Clippy.
 
 ## Handoff boundary
 
+Follow-up [run 34475507840](https://github.com/PurpleSwords/codex/actions/runs/34475507840)
+at `bcb66dc439` completed with core 1558 passed / 77 failed / 8 skipped, TUI
+4048 passed / 28 failed / 2 skipped, and installation context 16 passed.
+Both CLI preflight policies passed with empty stderr. The diagnostic artifact
+reports kernel `6.17.0-1022-azure`, glibc 2.39, userns enabled and the AppArmor
+restriction disabled. No system bwrap path was printed. Therefore the CLI probe
+did not reproduce the test abort and produced no failure strace.
+
+`core/tests/common/test_codex.rs:633` constructs local runtime paths with
+`std::env::current_exe()` (the test binary), plus the resolved Linux sandbox
+executable. This differs from exercising the CLI directly. The next diagnostic
+captures the exact AGENTS.md test with one test thread and zero retries after the
+original core suite fails. It has a two-minute bound and uploads its process/file
+trace. It does not replace the suite or clear its failure, and tracing may itself
+alter process behavior. The abort's root cause remains unconfirmed.
+
 No source or test fixes are committed by this stage. No test is removed, no
 assertion is weakened, no global timeout is increased, and no flaky rerun is used
 as a substitute for diagnosis. Remote main remains unchanged. Main migration,
