@@ -182,6 +182,15 @@ subsequently approved as a separate build-metadata commit for hosted validation.
 
 ## Migration gates
 
+The next hosted run, `34469800693`, passed Bazel dependency loading after the
+lockfile correction, then failed downloading the pinned zlib Debian package from
+a live Ubuntu mirror (HTTP 404). This is a toolchain fetch failure, not a Responses
+API failure or a test failure. `rules_rs_zlib_snapshot.patch` redirects both Linux
+host architectures to the official Ubuntu snapshot dated `20260901T000000Z`.
+Both archives were downloaded independently and match the original SHA-256 hashes;
+neither package versions nor verification were changed. Bazel lock regeneration
+passes without changing `MODULE.bazel.lock`. Hosted validation is still required.
+
 Do not transplant product changes until this CI baseline has a successful hosted
 run. Preserve failing tests and diagnose failures instead of filtering them out.
 Then use separate reviewable changes for Double Esc, WSL terminal probing, npm
