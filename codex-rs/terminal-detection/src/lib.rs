@@ -31,7 +31,7 @@ pub enum TerminalName {
     Iterm2,
     /// Warp terminal emulator.
     WarpTerminal,
-    /// Visual Studio Code integrated terminal.
+    /// Visual Studio Code or Cursor integrated terminal.
     VsCode,
     /// WezTerm terminal emulator.
     WezTerm,
@@ -294,6 +294,7 @@ pub fn terminal_info() -> TerminalInfo {
 /// - Otherwise, `TERM_PROGRAM` (plus `TERM_PROGRAM_VERSION`) drives the detected terminal name.
 ///   This means `TERM_PROGRAM` can mask later probes (for example `WT_SESSION`).
 /// - Next, terminal-specific variables (WEZTERM, iTerm2, Apple Terminal, kitty, etc.) are checked.
+///   VS Code injection signals take precedence over inherited host-terminal variables.
 /// - Finally, `TERM` is used as the capability fallback.
 ///
 /// tmux client term info is only consulted when a tmux multiplexer is detected, and it is
@@ -314,6 +315,10 @@ fn detect_terminal_info_from_env(env: &dyn Environment) -> TerminalInfo {
         let version = env.var_non_empty("TERM_PROGRAM_VERSION");
         let name = terminal_name_from_term_program(&term_program).unwrap_or(TerminalName::Unknown);
         return TerminalInfo::from_term_program(name, term_program, version, multiplexer);
+    }
+
+    if env.has_non_empty("VSCODE_INJECTION") || env.has_non_empty("VSCODE_IPC_HOOK_CLI") {
+        return TerminalInfo::from_name(TerminalName::VsCode, /*version*/ None, multiplexer);
     }
 
     if env.has("WEZTERM_VERSION") {
@@ -523,7 +528,7 @@ fn terminal_name_from_term_program(value: &str) -> Option<TerminalName> {
         "ghostty" => Some(TerminalName::Ghostty),
         "iterm" | "iterm2" | "itermapp" => Some(TerminalName::Iterm2),
         "warp" | "warpterminal" => Some(TerminalName::WarpTerminal),
-        "vscode" => Some(TerminalName::VsCode),
+        "vscode" | "cursor" => Some(TerminalName::VsCode),
         "wezterm" => Some(TerminalName::WezTerm),
         "kitty" => Some(TerminalName::Kitty),
         "alacritty" => Some(TerminalName::Alacritty),
