@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used)]
 
+use anyhow::Context;
 use anyhow::Result;
 use core_test_support::responses::WebSocketConnectionConfig;
 use core_test_support::responses::ev_assistant_message;
@@ -17,6 +18,7 @@ use core_test_support::test_codex::test_codex;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
 use serde_json::json;
+use std::time::Duration;
 
 const TURN_STATE_HEADER: &str = "x-codex-turn-state";
 
@@ -125,6 +127,14 @@ async fn websocket_turn_state_persists_within_turn_and_resets_after() -> Result<
     let mut builder = test_codex();
     let test = builder.build_with_websocket_server(&server).await?;
     // Phase 1: startup prewarm uses the connection without generating a response.
+    // submit_turn changes the sandbox policy. Observe the prewarm request before
+    // changing it so the read-only assertion below does not race startup.
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        server.wait_for_request(/*connection_index*/ 0, /*request_index*/ 0),
+    )
+    .await
+    .context("startup prewarm request was not observed before the first turn")?;
     // Phase 2: the first turn mints state for its same-turn tool follow-up.
     test.submit_turn("run the echo command").await?;
     // Phase 3: the follow-up replays that state on the same physical connection.

@@ -1,3 +1,4 @@
+use anyhow::Context;
 use anyhow::Result;
 use codex_core::StartThreadOptions;
 use codex_core::ThreadConfigSnapshot;
@@ -1324,19 +1325,38 @@ async fn grandchild_full_fork_preserves_context_baseline(
                 sleep(Duration::from_millis(/*millis*/ 10)).await;
             }
         })
-        .await?;
+        .await
+        .with_context(|| {
+            let matched_requests = mock.requests().len();
+            format!(
+                "waiting for context-baseline request from {agent_name}: {matched_requests} matched requests, {parent_context:?}, {history_mode:?}"
+            )
+        })?;
         let thread_id = ThreadId::from_string(
             request.body_json()["client_metadata"]["thread_id"]
                 .as_str()
                 .expect("descendant thread id"),
         )?;
         let thread = test.thread_manager.get_thread(thread_id).await?;
+        let mut last_status = None;
         timeout(Duration::from_secs(/*secs*/ 10), async {
-            while !matches!(thread.agent_status().await, AgentStatus::Completed(_)) {
+            loop {
+                let status = thread.agent_status().await;
+                let completed = matches!(status, AgentStatus::Completed(_));
+                last_status = Some(status);
+                if completed {
+                    break;
+                }
                 sleep(Duration::from_millis(/*millis*/ 10)).await;
             }
         })
-        .await?;
+        .await
+        .with_context(|| {
+            let status = format!("{last_status:?}").chars().take(512).collect::<String>();
+            format!(
+                "waiting for context-baseline completion of {agent_name} ({thread_id}): {status}, {parent_context:?}, {history_mode:?}"
+            )
+        })?;
         descendant_requests.push(request);
     }
     let context_counts = [
