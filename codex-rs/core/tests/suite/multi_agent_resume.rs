@@ -48,7 +48,7 @@ const INTERRUPT_PROMPT: &str = "release the interrupted worker";
 const SIBLING_NAME: &str = "survivor";
 const ROLE_NAME: &str = "durable_worker";
 const ROLE_MODEL: &str = "gpt-5.6-sol";
-const ROLE_MODEL_PROVIDER_ID: &str = "openai";
+const ROLE_MODEL_PROVIDER_ID: &str = "mock";
 const ROLE_DEVELOPER_INSTRUCTIONS: &str = "Keep the durable worker role configuration.";
 const SUBAGENT_DEVELOPER_INSTRUCTIONS: &str = "Use the default durable worker instructions.";
 
@@ -296,11 +296,12 @@ async fn cold_root_resume_restores_agent_identity_and_role_on_followup() -> Resu
             && request.body_contains_text("<permission_profile type=\"disabled\">")
             && !request.body_contains_text(SUBAGENT_DEVELOPER_INSTRUCTIONS)
     }));
+    let worker_provider = worker_thread.config().await.model_provider.clone();
     assert_eq!(
-        worker_thread.config().await.model_provider,
-        initial.codex.config().await.model_provider,
-        "roles must inherit the parent's complete model provider",
+        worker_provider,
+        worker_thread.config().await.model_providers["mock"]
     );
+    assert_ne!(worker_provider, initial.codex.config().await.model_provider);
     let initial_worker_config = worker_thread.config_snapshot().await;
     let initial_worker_role_config = (
         initial_worker_config.model,
@@ -444,6 +445,7 @@ async fn cold_root_resume_restores_agent_identity_and_role_on_followup() -> Resu
 
     let redirected_server = start_mock_server().await;
     let redirected_base_url = format!("{}/v1", redirected_server.uri());
+    let worker_base_url = format!("{}/v1", server.uri());
     std::fs::write(
         resumed.config.codex_home.join("durable-worker-role.toml"),
         format!(
@@ -452,6 +454,12 @@ model_reasoning_effort = "high"
 developer_instructions = "{ROLE_DEVELOPER_INSTRUCTIONS}"
 model_provider = "{ROLE_MODEL_PROVIDER_ID}"
 openai_base_url = "{redirected_base_url}"
+
+[model_providers.mock]
+name = "mock"
+base_url = "{worker_base_url}"
+env_key = "PATH"
+wire_api = "responses"
 "#
         ),
     )?;
@@ -480,8 +488,8 @@ openai_base_url = "{redirected_base_url}"
         .expect("queued message should lazily reload the original worker");
     assert_eq!(
         reloaded_worker.config().await.model_provider,
-        resumed.codex.config().await.model_provider,
-        "cold reload must preserve the parent's complete model provider",
+        worker_provider,
+        "cold reload must restore the child's selected provider",
     );
     resumed.submit_turn(FOLLOWUP_PROMPT).await?;
     wait_for_event(reloaded_worker.as_ref(), |event| {
@@ -644,7 +652,7 @@ openai_base_url = "{redirected_base_url}"
             .await
             .expect("captured redirected-provider requests")
             .is_empty(),
-        "a changed role must not redirect resumed model requests",
+        "openai_base_url must not redirect a custom provider's model requests",
     );
 
     Ok(())

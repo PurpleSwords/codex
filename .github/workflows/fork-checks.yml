@@ -124,6 +124,15 @@ jobs:
               -E 'test(snapshot_rollback_followup_turn_trims_context_updates) | test(snapshot_rollback_past_compaction_replays_append_only_history) | test(restates_the_current_remainder_after_rollback)' \
               --retries=0
           done
+      - name: Test agent role and provider contracts
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && (inputs.profile == 'core-regressions' || inputs.profile == 'baseline' || inputs.profile == '') }}
+        run: |
+          just test --locked -p codex-core --lib \
+            -E 'test(agent::role::tests::) | test(multi_agent_v2_spawn_partial_fork_turns_allows_agent_type_override)' \
+            --retries=0
+          just test --locked -p codex-core --test all \
+            -E 'test(suite::subagent_provider::) | test(suite::multi_agent_resume::)' \
+            --retries=0
       - name: Trace the failing filesystem helper test
         if: ${{ !cancelled() && steps.core_tests.outcome == 'failure' }}
         run: |
