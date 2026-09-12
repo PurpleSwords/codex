@@ -446,7 +446,7 @@ impl ModelProvider for ConfiguredModelProvider {
         codex_home: PathBuf,
         config_model_catalog: Option<ModelsResponse>,
     ) -> SharedModelsManager {
-        match config_model_catalog {
+        let manager: SharedModelsManager = match config_model_catalog {
             Some(model_catalog) => Arc::new(StaticModelsManager::new(
                 self.auth_manager.clone(),
                 model_catalog,
@@ -457,12 +457,13 @@ impl ModelProvider for ConfiguredModelProvider {
                     self.auth_manager.clone(),
                 ));
                 Arc::new(OpenAiModelsManager::new(
-                    codex_home,
+                    codex_home.clone(),
                     endpoint,
                     self.auth_manager.clone(),
                 ))
             }
-        }
+        };
+        codex_models_manager::with_local_model_extensions(manager, &codex_home)
     }
 
     fn models_manager_without_cache(

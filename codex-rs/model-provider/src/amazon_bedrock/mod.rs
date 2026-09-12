@@ -311,14 +311,15 @@ impl ModelProvider for AmazonBedrockModelProvider {
 
     fn models_manager(
         &self,
-        _codex_home: PathBuf,
+        codex_home: PathBuf,
         config_model_catalog: Option<ModelsResponse>,
     ) -> SharedModelsManager {
-        Arc::new(StaticModelsManager::new(
+        let manager = Arc::new(StaticModelsManager::new(
             /*auth_manager*/ None,
             config_model_catalog
                 .map_or_else(|| self.default_model_catalog(), normalize_bedrock_catalog),
-        ))
+        ));
+        codex_models_manager::with_local_model_extensions(manager, &codex_home)
     }
 
     fn models_manager_without_cache(
