@@ -65,6 +65,8 @@ fn retained_stdout_does_not_wait_for_eof() {
     // The shell exits immediately; its short-lived descendant retains stdout.
     let mut command = Command::new("/bin/sh");
     command.args(["-c", "sleep 3 & printf 'TERM_PROGRAM=vscode'"]);
+    // Retain only the probe's pipe, not nextest's stderr capture pipe.
+    command.stderr(Stdio::null());
     let start = Instant::now();
     assert_eq!(
         read_output(&mut command, Duration::from_secs(2)).unwrap(),
