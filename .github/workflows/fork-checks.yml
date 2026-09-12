@@ -16,13 +16,14 @@ on:
           - baseline
           - unit-regressions
           - core-regressions
+          - tui-terminal-regressions
 
 permissions:
   contents: read
 
 jobs:
   linux:
-    name: ${{ inputs.profile == 'unit-regressions' && 'Linux unit regressions (diagnostic only)' || inputs.profile == 'core-regressions' && 'Linux core regressions (diagnostic only)' || 'Linux build and baseline tests' }}
+    name: ${{ inputs.profile == 'unit-regressions' && 'Linux unit regressions (diagnostic only)' || inputs.profile == 'core-regressions' && 'Linux core regressions (diagnostic only)' || inputs.profile == 'tui-terminal-regressions' && 'Linux TUI terminal regressions (diagnostic only)' || 'Linux build and baseline tests' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     defaults:
@@ -61,7 +62,7 @@ jobs:
             official-01534-linux-v1-${{ hashFiles('codex-rs/Cargo.lock', 'codex-rs/rust-toolchain.toml') }}-
       - name: Build workspace binaries including runtime test helpers
         id: build
-        if: inputs.profile != 'unit-regressions'
+        if: inputs.profile != 'unit-regressions' && inputs.profile != 'tui-terminal-regressions'
         run: |
           cargo build --locked --workspace --bins
           # Test executables live in debug/deps and cannot discover debug/bwrap.
@@ -145,6 +146,12 @@ jobs:
       - name: Test TUI library
         if: ${{ !cancelled() && steps.build.outcome == 'success' && inputs.profile != 'unit-regressions' && inputs.profile != 'core-regressions' }}
         run: just test --locked -p codex-tui --lib
+      - name: Test TUI terminal detection contracts
+        if: inputs.profile == 'tui-terminal-regressions'
+        run: |
+          just test --locked -p codex-tui --lib \
+            -E 'test(tui::keyboard_modes::) | test(resize_reflow_cap::)' \
+            --retries=0
       - name: Test installation context
         if: ${{ !cancelled() && steps.build.outcome == 'success' && inputs.profile != 'unit-regressions' && inputs.profile != 'core-regressions' }}
         run: just test --locked -p codex-install-context
