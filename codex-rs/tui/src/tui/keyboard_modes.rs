@@ -106,12 +106,9 @@ fn read_windows_term_program() -> Option<String> {
     if !running_in_wsl() {
         return None;
     }
-    let executable = which::which("cmd.exe").ok()?;
-    let mut command = std::process::Command::new(&executable);
+    let mut command = std::process::Command::new("cmd.exe");
     command
         .args(["/d", "/s", "/c", "set TERM_PROGRAM"])
-        // Avoid Windows UNC working-directory fallback for Linux workspaces.
-        .current_dir(executable.parent()?)
         .stdin(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
     let output =
