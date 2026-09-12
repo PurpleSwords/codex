@@ -2,6 +2,9 @@ use super::*;
 use pretty_assertions::assert_eq;
 use std::collections::HashMap;
 
+#[path = "vscode_tests.rs"]
+mod vscode_tests;
+
 struct FakeEnvironment {
     vars: HashMap<String, String>,
     tmux_client_info: TmuxClientInfo,

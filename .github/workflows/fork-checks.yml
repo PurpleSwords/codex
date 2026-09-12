@@ -149,6 +149,7 @@ jobs:
       - name: Test TUI terminal detection contracts
         if: inputs.profile == 'tui-terminal-regressions'
         run: |
+          just test --locked -p codex-terminal-detection --lib --retries=0
           just test --locked -p codex-tui --lib \
             -E 'test(tui::keyboard_modes::) | test(resize_reflow_cap::)' \
             --retries=0

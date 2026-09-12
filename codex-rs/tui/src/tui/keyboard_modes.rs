@@ -23,13 +23,16 @@ const DISABLE_KEYBOARD_ENHANCEMENT_ENV_VAR: &str = "CODEX_TUI_DISABLE_KEYBOARD_E
 
 pub(super) fn keyboard_enhancement_disabled() -> bool {
     let disable_env = std::env::var(DISABLE_KEYBOARD_ENHANCEMENT_ENV_VAR).ok();
-    let is_wsl = running_in_wsl();
-    keyboard_enhancement_disabled_for(disable_env.as_deref(), is_wsl, running_in_vscode_terminal)
+    keyboard_enhancement_disabled_for(
+        disable_env.as_deref(),
+        running_in_wsl,
+        running_in_vscode_terminal,
+    )
 }
 
 fn keyboard_enhancement_disabled_for(
     disable_env: Option<&str>,
-    is_wsl: bool,
+    is_wsl: impl FnOnce() -> bool,
     is_vscode_terminal: impl FnOnce() -> bool,
 ) -> bool {
     if let Some(disabled) = parse_bool_env(disable_env) {
@@ -39,7 +42,7 @@ fn keyboard_enhancement_disabled_for(
     // VS Code running a WSL shell can hide TERM_PROGRAM from the Linux process
     // environment, so `running_in_vscode_terminal` also probes the Windows-side
     // environment through WSL interop.
-    is_wsl && is_vscode_terminal()
+    is_wsl() && is_vscode_terminal()
 }
 
 fn parse_bool_env(value: Option<&str>) -> Option<bool> {
@@ -67,22 +70,35 @@ fn running_in_wsl() -> bool {
 }
 
 pub(super) fn running_in_vscode_terminal() -> bool {
-    vscode_terminal_detected(
-        std::env::var("TERM_PROGRAM").ok().as_deref(),
-        windows_term_program,
-    )
+    vscode_terminal_detected(terminal_info().name, windows_term_program)
 }
 
 fn vscode_terminal_detected(
-    linux_term_program: Option<&str>,
+    terminal_name: TerminalName,
     windows_term_program: impl FnOnce() -> Option<String>,
 ) -> bool {
-    term_program_is_vscode(linux_term_program)
-        || term_program_is_vscode(windows_term_program().as_deref())
+    match terminal_name {
+        TerminalName::VsCode => true,
+        TerminalName::Unknown => term_program_is_vscode(windows_term_program().as_deref()),
+        TerminalName::AppleTerminal
+        | TerminalName::Ghostty
+        | TerminalName::Iterm2
+        | TerminalName::WarpTerminal
+        | TerminalName::WezTerm
+        | TerminalName::Kitty
+        | TerminalName::Alacritty
+        | TerminalName::Konsole
+        | TerminalName::GnomeTerminal
+        | TerminalName::Vte
+        | TerminalName::WindowsTerminal
+        | TerminalName::Dumb => false,
+    }
 }
 
 fn term_program_is_vscode(value: Option<&str>) -> bool {
-    value.is_some_and(|value| value.eq_ignore_ascii_case("vscode"))
+    value.is_some_and(|value| {
+        value.eq_ignore_ascii_case("vscode") || value.eq_ignore_ascii_case("cursor")
+    })
 }
 
 fn windows_term_program() -> Option<String> {
@@ -306,6 +322,10 @@ impl Command for DisableModifyOtherKeys {
 }
 
 #[cfg(test)]
+#[path = "terminal_detection_tests.rs"]
+mod terminal_detection_tests;
+
+#[cfg(test)]
 mod tests {
     use super::DisableModifyOtherKeys;
     use super::EnableModifyOtherKeys;
@@ -409,7 +429,7 @@ mod tests {
     fn keyboard_enhancement_auto_disables_for_vscode_in_wsl() {
         assert!(keyboard_enhancement_disabled_for(
             /*disable_env*/ None,
-            /*is_wsl*/ true,
+            || true,
             || true
         ));
     }
@@ -418,12 +438,12 @@ mod tests {
     fn keyboard_enhancement_auto_disable_requires_wsl_and_vscode() {
         assert!(!keyboard_enhancement_disabled_for(
             /*disable_env*/ None,
-            /*is_wsl*/ true,
+            || true,
             || false
         ));
         assert!(!keyboard_enhancement_disabled_for(
             /*disable_env*/ None,
-            /*is_wsl*/ false,
+            || false,
             || panic!("non-WSL must skip Windows detection")
         ));
     }
@@ -432,33 +452,28 @@ mod tests {
     fn keyboard_enhancement_env_flag_overrides_auto_detection() {
         assert!(!keyboard_enhancement_disabled_for(
             Some("0"),
-            /*is_wsl*/ true,
+            || panic!("explicit enable must skip WSL detection"),
             || panic!("explicit enable must skip detection")
         ));
         assert!(keyboard_enhancement_disabled_for(
             Some("1"),
-            /*is_wsl*/ false,
+            || panic!("explicit disable must skip WSL detection"),
             || panic!("explicit disable must skip detection")
         ));
     }
 
     #[test]
     fn vscode_terminal_detection_uses_linux_and_windows_term_program() {
-        assert!(vscode_terminal_detected(Some("vscode"), || panic!(
+        assert!(vscode_terminal_detected(TerminalName::VsCode, || panic!(
             "Linux TERM_PROGRAM must skip Windows detection"
         )));
-        assert!(vscode_terminal_detected(
-            /*linux_term_program*/ None,
-            || Some("vscode".to_string())
-        ));
-        assert!(!vscode_terminal_detected(
-            /*linux_term_program*/ None,
-            || Some("WindowsTerminal".to_string())
-        ));
-        assert!(!vscode_terminal_detected(
-            /*linux_term_program*/ None,
-            || None
-        ));
+        assert!(vscode_terminal_detected(TerminalName::Unknown, || Some(
+            "vscode".to_string()
+        )));
+        assert!(!vscode_terminal_detected(TerminalName::Unknown, || Some(
+            "WindowsTerminal".to_string()
+        )));
+        assert!(!vscode_terminal_detected(TerminalName::Unknown, || None));
     }
 
     #[test]
