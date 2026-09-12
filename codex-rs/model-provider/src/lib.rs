@@ -29,3 +29,6 @@ pub use provider::ProviderUnauthorizedRecovery;
 pub use provider::RemoteCompactionSupport;
 pub use provider::SharedModelProvider;
 pub use provider::create_model_provider;
+#[cfg(test)]
+#[path = "model_extensions_tests.rs"]
+mod model_extensions_tests;

@@ -18,13 +18,14 @@ on:
           - core-regressions
           - tui-terminal-regressions
           - integration-races
+          - model-catalog-extensions
 
 permissions:
   contents: read
 
 jobs:
   linux:
-    name: ${{ inputs.profile == 'unit-regressions' && 'Linux unit regressions (diagnostic only)' || inputs.profile == 'core-regressions' && 'Linux core regressions (diagnostic only)' || inputs.profile == 'tui-terminal-regressions' && 'Linux TUI terminal regressions (diagnostic only)' || inputs.profile == 'integration-races' && 'Linux integration races (diagnostic only)' || 'Linux build and baseline tests' }}
+    name: ${{ inputs.profile == 'model-catalog-extensions' && 'Linux model catalog extensions (diagnostic only)' || inputs.profile == 'unit-regressions' && 'Linux unit regressions (diagnostic only)' || inputs.profile == 'core-regressions' && 'Linux core regressions (diagnostic only)' || inputs.profile == 'tui-terminal-regressions' && 'Linux TUI terminal regressions (diagnostic only)' || inputs.profile == 'integration-races' && 'Linux integration races (diagnostic only)' || 'Linux build and baseline tests' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     defaults:
@@ -63,7 +64,7 @@ jobs:
             official-01534-linux-v1-${{ hashFiles('codex-rs/Cargo.lock', 'codex-rs/rust-toolchain.toml') }}-
       - name: Build workspace binaries including runtime test helpers
         id: build
-        if: inputs.profile != 'unit-regressions' && inputs.profile != 'tui-terminal-regressions'
+        if: inputs.profile != 'unit-regressions' && inputs.profile != 'tui-terminal-regressions' && inputs.profile != 'model-catalog-extensions'
         run: |
           cargo build --locked --workspace --bins
           # Test executables live in debug/deps and cannot discover debug/bwrap.
@@ -169,6 +170,9 @@ jobs:
       - name: Rust benchmark smoke test
         if: ${{ !cancelled() && steps.build.outcome == 'success' && inputs.benchmarks }}
         run: just bench-smoke
+      - name: Test fork model catalog extensions
+        if: ${{ !cancelled() && (inputs.profile == 'model-catalog-extensions' || (steps.build.outcome == 'success' && (inputs.profile == 'baseline' || inputs.profile == ''))) }}
+        run: just test --locked -p codex-models-manager -p codex-model-provider --lib --retries=0
       - name: Check for a clean worktree
         if: always() && !cancelled()
         uses: ./.github/actions/check-clean-worktree
