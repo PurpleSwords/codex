@@ -617,15 +617,17 @@ impl Session {
             .turn_metadata_state
             .cancel_git_enrichment_task();
 
-        let turn_state = {
+        let finishing_turn = {
             let mut active = self.active_turn.lock().await;
             active.as_mut().and_then(|active_turn| {
                 let task = active_turn.task.take()?;
                 task.handle.detach();
-                Some(Arc::clone(&active_turn.turn_state))
+                let completion = CancellationToken::new();
+                active_turn.completion = Some(completion.clone());
+                Some((Arc::clone(&active_turn.turn_state), completion.drop_guard()))
             })
         };
-        let Some(turn_state) = turn_state else {
+        let Some((turn_state, _completion_guard)) = finishing_turn else {
             return;
         };
         let pending_input = self

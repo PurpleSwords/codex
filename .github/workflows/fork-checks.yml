@@ -92,6 +92,20 @@ jobs:
         id: core_tests
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: just test --locked -p codex-core --test all
+      - name: Test fork output and rollback regression contracts
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          just test --locked -p codex-core --lib \
+            -E 'test(rollback_completion_tests::) | test(transcript_preserves_output_before_subscription_and_after_lag)' \
+            --retries=0
+          # Reuse the integration binary built above. Each round must pass on
+          # its first attempt; this is not a retry that can erase a failure.
+          for round in {1..10}; do
+            echo "Rollback regression round $round/10"
+            just test --locked -p codex-core --test all \
+              -E 'test(snapshot_rollback_followup_turn_trims_context_updates) | test(snapshot_rollback_past_compaction_replays_append_only_history) | test(restates_the_current_remainder_after_rollback)' \
+              --retries=0
+          done
       - name: Trace the failing filesystem helper test
         if: ${{ !cancelled() && steps.core_tests.outcome == 'failure' }}
         run: |

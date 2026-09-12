@@ -265,6 +265,17 @@ pub async fn thread_rollback(sess: &Arc<Session>, sub_id: String, num_turns: u32
         return;
     }
 
+    // A client can receive TurnComplete before on_task_finished clears the
+    // active turn. Wait only for that finalizer, without holding the turn lock
+    // or changing terminal-event ordering. A running/reserved turn still fails.
+    let completion = {
+        let active = sess.active_turn.lock().await;
+        active.as_ref().and_then(|turn| turn.completion.clone())
+    };
+    if let Some(completion) = completion {
+        completion.cancelled().await;
+    }
+    // Recheck: a new turn may have started while the old one was finishing.
     let has_active_turn = { sess.active_turn.lock().await.is_some() };
     if has_active_turn {
         sess.send_event_raw(Event {
