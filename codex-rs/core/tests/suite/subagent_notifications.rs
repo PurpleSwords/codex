@@ -1,3 +1,4 @@
+use anyhow::Context;
 use anyhow::Result;
 use codex_core::StartThreadOptions;
 use codex_core::ThreadConfigSnapshot;
@@ -1264,11 +1265,20 @@ async fn grandchild_full_fork_preserves_context_baseline(
         ]),
     )
     .await;
+    // Finish each parent's answer, not just its response stream. An empty
+    // response leaves mailbox delivery open, so a racing child completion can
+    // trigger another sampling request and exhaust these two responses.
     let _parent_followups = mount_sse_sequence(
         &server,
         vec![
-            sse(vec![ev_completed("baseline-parent-finished-1")]),
-            sse(vec![ev_completed("baseline-parent-finished-2")]),
+            sse(vec![
+                ev_assistant_message("baseline-parent-answer-1", "Delegated the context check."),
+                ev_completed("baseline-parent-finished-1"),
+            ]),
+            sse(vec![
+                ev_assistant_message("baseline-parent-answer-2", "Delegated the context check."),
+                ev_completed("baseline-parent-finished-2"),
+            ]),
         ],
     )
     .await;
@@ -1324,19 +1334,38 @@ async fn grandchild_full_fork_preserves_context_baseline(
                 sleep(Duration::from_millis(/*millis*/ 10)).await;
             }
         })
-        .await?;
+        .await
+        .with_context(|| {
+            let captured_requests = mock.requests().len();
+            format!(
+                "waiting for context-baseline request from {agent_name}: {captured_requests} captured requests, {parent_context:?}, {history_mode:?}"
+            )
+        })?;
         let thread_id = ThreadId::from_string(
             request.body_json()["client_metadata"]["thread_id"]
                 .as_str()
                 .expect("descendant thread id"),
         )?;
         let thread = test.thread_manager.get_thread(thread_id).await?;
+        let mut last_status = None;
         timeout(Duration::from_secs(/*secs*/ 10), async {
-            while !matches!(thread.agent_status().await, AgentStatus::Completed(_)) {
+            loop {
+                let status = thread.agent_status().await;
+                let completed = matches!(status, AgentStatus::Completed(_));
+                last_status = Some(status);
+                if completed {
+                    break;
+                }
                 sleep(Duration::from_millis(/*millis*/ 10)).await;
             }
         })
-        .await?;
+        .await
+        .with_context(|| {
+            let status = format!("{last_status:?}").chars().take(512).collect::<String>();
+            format!(
+                "waiting for context-baseline completion of {agent_name} ({thread_id}): {status}, {parent_context:?}, {history_mode:?}"
+            )
+        })?;
         descendant_requests.push(request);
     }
     let context_counts = [

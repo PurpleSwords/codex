@@ -17,13 +17,14 @@ on:
           - unit-regressions
           - core-regressions
           - tui-terminal-regressions
+          - integration-races
 
 permissions:
   contents: read
 
 jobs:
   linux:
-    name: ${{ inputs.profile == 'unit-regressions' && 'Linux unit regressions (diagnostic only)' || inputs.profile == 'core-regressions' && 'Linux core regressions (diagnostic only)' || inputs.profile == 'tui-terminal-regressions' && 'Linux TUI terminal regressions (diagnostic only)' || 'Linux build and baseline tests' }}
+    name: ${{ inputs.profile == 'unit-regressions' && 'Linux unit regressions (diagnostic only)' || inputs.profile == 'core-regressions' && 'Linux core regressions (diagnostic only)' || inputs.profile == 'tui-terminal-regressions' && 'Linux TUI terminal regressions (diagnostic only)' || inputs.profile == 'integration-races' && 'Linux integration races (diagnostic only)' || 'Linux build and baseline tests' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     defaults:
@@ -78,7 +79,7 @@ jobs:
           "$CARGO_TARGET_DIR/debug/codex" --version
           "$CARGO_TARGET_DIR/debug/codex" --help
       - name: Share CLI and companion with SDK checks
-        if: ${{ !cancelled() && steps.build.outcome == 'success' && inputs.profile != 'core-regressions' }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && inputs.profile != 'core-regressions' && inputs.profile != 'integration-races' }}
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: linux-sdk-binaries
@@ -102,10 +103,10 @@ jobs:
           retention-days: 3
       - name: Test core integration suite including Responses
         id: core_tests
-        if: ${{ !cancelled() && steps.build.outcome == 'success' && inputs.profile != 'unit-regressions' && inputs.profile != 'core-regressions' }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && inputs.profile != 'unit-regressions' && inputs.profile != 'core-regressions' && inputs.profile != 'integration-races' }}
         run: just test --locked -p codex-core --test all
       - name: Test fork output and rollback regression contracts
-        if: ${{ !cancelled() && (steps.build.outcome == 'success' || inputs.profile == 'unit-regressions') }}
+        if: ${{ !cancelled() && (steps.build.outcome == 'success' || inputs.profile == 'unit-regressions') && inputs.profile != 'integration-races' }}
         env:
           CHECK_PROFILE: ${{ inputs.profile }}
         run: |
@@ -143,8 +144,17 @@ jobs:
           path: ${{ runner.temp }}/core-sandbox-trace/*.strace
           if-no-files-found: error
           retention-days: 3
+      - name: Exercise known integration races without retries
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && inputs.profile == 'integration-races' }}
+        run: |
+          for round in {1..20}; do
+            echo "Integration race round $round/20"
+            just test --locked -p codex-core --test all \
+              -E 'test(websocket_turn_state_persists_within_turn_and_resets_after) | test(grandchild_full_fork_preserves_context_baseline)' \
+              --retries=0
+          done
       - name: Test TUI library
-        if: ${{ !cancelled() && steps.build.outcome == 'success' && inputs.profile != 'unit-regressions' && inputs.profile != 'core-regressions' }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && inputs.profile != 'unit-regressions' && inputs.profile != 'core-regressions' && inputs.profile != 'integration-races' }}
         run: just test --locked -p codex-tui --lib
       - name: Test TUI terminal detection contracts
         if: inputs.profile == 'tui-terminal-regressions'
@@ -154,7 +164,7 @@ jobs:
             -E 'test(tui::keyboard_modes::) | test(resize_reflow_cap::)' \
             --retries=0
       - name: Test installation context
-        if: ${{ !cancelled() && steps.build.outcome == 'success' && inputs.profile != 'unit-regressions' && inputs.profile != 'core-regressions' }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && inputs.profile != 'unit-regressions' && inputs.profile != 'core-regressions' && inputs.profile != 'integration-races' }}
         run: just test --locked -p codex-install-context
       - name: Rust benchmark smoke test
         if: ${{ !cancelled() && steps.build.outcome == 'success' && inputs.benchmarks }}
