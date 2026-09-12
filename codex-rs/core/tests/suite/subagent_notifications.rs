@@ -1265,11 +1265,20 @@ async fn grandchild_full_fork_preserves_context_baseline(
         ]),
     )
     .await;
+    // Finish each parent's answer, not just its response stream. An empty
+    // response leaves mailbox delivery open, so a racing child completion can
+    // trigger another sampling request and exhaust these two responses.
     let _parent_followups = mount_sse_sequence(
         &server,
         vec![
-            sse(vec![ev_completed("baseline-parent-finished-1")]),
-            sse(vec![ev_completed("baseline-parent-finished-2")]),
+            sse(vec![
+                ev_assistant_message("baseline-parent-answer-1", "Delegated the context check."),
+                ev_completed("baseline-parent-finished-1"),
+            ]),
+            sse(vec![
+                ev_assistant_message("baseline-parent-answer-2", "Delegated the context check."),
+                ev_completed("baseline-parent-finished-2"),
+            ]),
         ],
     )
     .await;
@@ -1327,9 +1336,9 @@ async fn grandchild_full_fork_preserves_context_baseline(
         })
         .await
         .with_context(|| {
-            let matched_requests = mock.requests().len();
+            let captured_requests = mock.requests().len();
             format!(
-                "waiting for context-baseline request from {agent_name}: {matched_requests} matched requests, {parent_context:?}, {history_mode:?}"
+                "waiting for context-baseline request from {agent_name}: {captured_requests} captured requests, {parent_context:?}, {history_mode:?}"
             )
         })?;
         let thread_id = ThreadId::from_string(
