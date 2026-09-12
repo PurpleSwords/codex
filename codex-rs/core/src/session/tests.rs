@@ -1,3 +1,6 @@
+#[path = "rollback_completion_tests.rs"]
+mod rollback_completion_tests;
+
 use super::mcp_refresh::McpRefresh;
 use super::step_settings::ResolvedStepSettings;
 use super::step_settings::StepSettings;
