@@ -347,14 +347,26 @@ where
 {
     use tokio::time::Duration;
     use tokio::time::timeout;
+    let mut last_event = None;
+    let mut last_error = None;
     loop {
         // Allow a bit more time to accommodate async startup work (e.g. config IO, tool discovery)
         let ev = timeout(wait_time.max(Duration::from_secs(10)), codex.next_event())
             .await
-            .expect("timeout waiting for event")
+            .unwrap_or_else(|_| {
+                panic!(
+                    "timeout waiting for event; last unmatched event: {last_event:?}; last unmatched error: {last_error:?}"
+                )
+            })
             .expect("stream ended unexpectedly");
         if predicate(&ev.msg) {
             return ev.msg;
+        }
+        // Keep diagnostics bounded and avoid retaining message/tool payloads.
+        // An error rejected by the predicate must remain visible if we time out.
+        last_event = Some(ev.msg.to_string());
+        if let codex_protocol::protocol::EventMsg::Error(error) = &ev.msg {
+            last_error = Some(error.message.chars().take(512).collect::<String>());
         }
     }
 }
