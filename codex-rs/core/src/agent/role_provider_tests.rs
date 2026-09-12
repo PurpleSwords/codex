@@ -1,4 +1,5 @@
 use super::*;
+use pretty_assertions::assert_eq;
 
 #[tokio::test]
 async fn role_provider_selection_and_replacement_preserve_parent_config() {
@@ -8,7 +9,7 @@ async fn role_provider_selection_and_replacement_preserve_parent_config() {
         env_key: Some("PARENT_PROVIDER_KEY".to_string()),
         http_headers: Some(HashMap::from([(
             "x-parent-secret".to_string(),
-            "secret".to_string(),
+            "secret".into(),
         )])),
         ..Default::default()
     };
