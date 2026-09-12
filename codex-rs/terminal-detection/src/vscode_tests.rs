@@ -1,4 +1,8 @@
-use super::*;
+use super::FakeEnvironment;
+use super::terminal_info;
+use crate::TerminalName;
+use crate::detect_terminal_info_from_env;
+use pretty_assertions::assert_eq;
 
 #[test]
 fn cursor_uses_vscode_compatibility_without_losing_metadata() {
