@@ -7,13 +7,22 @@ on:
         type: boolean
         default: false
   workflow_dispatch:
+    inputs:
+      profile:
+        description: "Targeted diagnostics do not replace PR baseline CI"
+        type: choice
+        default: baseline
+        options:
+          - baseline
+          - unit-regressions
+          - core-regressions
 
 permissions:
   contents: read
 
 jobs:
   linux:
-    name: Linux build and baseline tests
+    name: ${{ inputs.profile == 'unit-regressions' && 'Linux unit regressions (diagnostic only)' || inputs.profile == 'core-regressions' && 'Linux core regressions (diagnostic only)' || 'Linux build and baseline tests' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     defaults:
@@ -52,6 +61,7 @@ jobs:
             official-01534-linux-v1-${{ hashFiles('codex-rs/Cargo.lock', 'codex-rs/rust-toolchain.toml') }}-
       - name: Build workspace binaries including runtime test helpers
         id: build
+        if: inputs.profile != 'unit-regressions'
         run: |
           cargo build --locked --workspace --bins
           # Test executables live in debug/deps and cannot discover debug/bwrap.
@@ -60,13 +70,14 @@ jobs:
             "$CARGO_TARGET_DIR/debug/codex-resources/bwrap"
           cmp "$CARGO_TARGET_DIR/debug/bwrap" "$CARGO_TARGET_DIR/debug/codex-resources/bwrap"
       - name: Smoke test CLI with an isolated home
+        if: steps.build.outcome == 'success'
         run: |
           mkdir -p "$RUNNER_TEMP/codex-smoke-home"
           export CODEX_HOME="$RUNNER_TEMP/codex-smoke-home"
           "$CARGO_TARGET_DIR/debug/codex" --version
           "$CARGO_TARGET_DIR/debug/codex" --help
       - name: Share CLI and companion with SDK checks
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && inputs.profile != 'core-regressions' }}
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: linux-sdk-binaries
@@ -90,14 +101,19 @@ jobs:
           retention-days: 3
       - name: Test core integration suite including Responses
         id: core_tests
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && inputs.profile != 'unit-regressions' && inputs.profile != 'core-regressions' }}
         run: just test --locked -p codex-core --test all
       - name: Test fork output and rollback regression contracts
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        if: ${{ !cancelled() && (steps.build.outcome == 'success' || inputs.profile == 'unit-regressions') }}
+        env:
+          CHECK_PROFILE: ${{ inputs.profile }}
         run: |
           just test --locked -p codex-core --lib \
             -E 'test(rollback_completion_tests::) | test(transcript_preserves_output_before_subscription_and_after_lag)' \
             --retries=0
+          if [[ "$CHECK_PROFILE" == unit-regressions ]]; then
+            exit 0
+          fi
           # Reuse the integration binary built above. Each round must pass on
           # its first attempt; this is not a retry that can erase a failure.
           for round in {1..10}; do
@@ -127,10 +143,10 @@ jobs:
           if-no-files-found: error
           retention-days: 3
       - name: Test TUI library
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && inputs.profile != 'unit-regressions' && inputs.profile != 'core-regressions' }}
         run: just test --locked -p codex-tui --lib
       - name: Test installation context
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && inputs.profile != 'unit-regressions' && inputs.profile != 'core-regressions' }}
         run: just test --locked -p codex-install-context
       - name: Rust benchmark smoke test
         if: ${{ !cancelled() && steps.build.outcome == 'success' && inputs.benchmarks }}
