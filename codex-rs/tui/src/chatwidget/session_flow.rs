@@ -239,7 +239,7 @@ impl ChatWidget {
     pub(crate) fn emit_prompt_edit_thread_event(&mut self) {
         let line: Line<'static> = vec![
             "• ".dim(),
-            "You’re continuing from this point in a new conversation".into(),
+            "Editing an earlier prompt in this conversation".into(),
         ]
         .into();
         self.app_event_tx.send(AppEvent::InsertHistoryCell(Box::new(

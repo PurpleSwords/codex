@@ -4,14 +4,14 @@
 //! mediates a key rendering boundary for the transcript overlay.
 //!
 //! Overall goal: keep the main chat view and the transcript overlay in sync while allowing users
-//! to edit an earlier prompt on a source-preserving branch. Confirming a selection forks before
-//! the selected turn and restores its prompt in the new composer.
+//! to edit an earlier prompt in place. Confirming a selection reverts before the selected turn
+//! and restores its prompt in the composer without changing the thread ID.
 //!
 //! Backtrack operates as a small state machine:
 //! - The first `Esc` in the main view "primes" the feature and captures a base thread id.
 //! - A subsequent `Esc` opens the transcript overlay (`Ctrl+T`) and highlights a user message when
 //!   there is a prompt to reuse.
-//! - `Enter` requests a fork before the selected prompt and reopens it for editing.
+//! - `Enter` requests a revert before the selected prompt and reopens it for editing.
 //!
 //! The transcript overlay (`Ctrl+T`) renders committed transcript cells plus a render-only live
 //! tail derived from the current in-flight `ChatWidget.active_cell`.
@@ -72,7 +72,7 @@ pub(crate) struct BacktrackState {
     pub(crate) overlay_preview_active: bool,
 }
 
-/// A user-visible backtrack choice that can be reopened on a source-preserving branch.
+/// A user-visible backtrack choice that can be reopened in the current thread.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct BacktrackSelection {
     pub(crate) thread_id: ThreadId,
@@ -183,7 +183,7 @@ impl App {
         }
     }
 
-    /// Request a source-preserving branch before the selected prompt.
+    /// Request an in-place revert before the selected prompt.
     pub(crate) fn apply_backtrack_selection(&mut self, selection: BacktrackSelection) {
         if self.chat_widget.side_conversation_active() {
             self.reset_backtrack_state();
@@ -196,21 +196,22 @@ impl App {
             return;
         }
 
-        self.app_event_tx.send(AppEvent::ForkSessionForPromptEdit {
-            thread_id: selection.thread_id,
-            nth_user_message: selection.nth_user_message,
-            prompt: selection.prompt,
-        });
+        self.app_event_tx
+            .send(AppEvent::RevertSessionForPromptEdit {
+                thread_id: selection.thread_id,
+                nth_user_message: selection.nth_user_message,
+                prompt: selection.prompt,
+            });
     }
 
-    pub(crate) fn restore_backtrack_prompt_after_branch_error(
+    pub(crate) fn restore_backtrack_prompt_after_revert_error(
         &mut self,
         prompt: UserMessage,
         err: impl std::fmt::Display,
     ) {
         self.chat_widget.restore_user_message_to_composer(prompt);
         self.chat_widget.add_error_message(format!(
-            "Failed to branch before the selected prompt: {err}"
+            "Failed to edit the selected prompt in place: {err}"
         ));
     }
 
@@ -504,8 +505,8 @@ impl App {
 /// resolved against the same visible projection before restoring its canonical mention bindings.
 ///
 /// A turn can contain multiple user messages when it was steered. Only its initial prompt can be
-/// reopened independently because app-server cannot fork in the middle of a turn.
-pub(crate) fn backtrack_fork_before_turn_id(
+/// reopened independently because app-server cannot revert in the middle of a turn.
+pub(crate) fn backtrack_before_turn_id(
     turns: &[Turn],
     nth_user_message: usize,
     prompt: &mut UserMessage,
@@ -555,7 +556,7 @@ pub(crate) fn backtrack_fork_before_turn_id(
             }
 
             if is_steer {
-                bail!("the selected prompt is a steer and cannot be branched independently");
+                bail!("the selected prompt is a steer and cannot be edited independently");
             }
             if matches!(turn.status, TurnStatus::InProgress) {
                 bail!("the selected prompt belongs to a turn that is still in progress");
@@ -730,7 +731,7 @@ mod tests {
     }
 
     #[test]
-    fn backtrack_fork_before_turn_id_resolves_first_and_later_prompts() {
+    fn backtrack_before_turn_id_resolves_first_and_later_prompts() {
         let turns = vec![
             turn("turn-1", TurnStatus::Completed, /*user_messages*/ 1),
             turn(
@@ -742,7 +743,7 @@ mod tests {
         ];
 
         assert_eq!(
-            backtrack_fork_before_turn_id(
+            backtrack_before_turn_id(
                 &turns,
                 /*nth_user_message*/ 0,
                 &mut prompt("turn-1-prompt-0"),
@@ -751,7 +752,7 @@ mod tests {
             None
         );
         assert_eq!(
-            backtrack_fork_before_turn_id(
+            backtrack_before_turn_id(
                 &turns,
                 /*nth_user_message*/ 1,
                 &mut prompt("turn-2-prompt-0"),
@@ -762,14 +763,14 @@ mod tests {
     }
 
     #[test]
-    fn backtrack_fork_before_turn_id_rejects_mid_turn_steers() {
+    fn backtrack_before_turn_id_rejects_mid_turn_steers() {
         let turns = vec![turn(
             "turn-1",
             TurnStatus::Completed,
             /*user_messages*/ 2,
         )];
 
-        let error = backtrack_fork_before_turn_id(
+        let error = backtrack_before_turn_id(
             &turns,
             /*nth_user_message*/ 1,
             &mut prompt("turn-1-prompt-1"),
@@ -778,12 +779,12 @@ mod tests {
 
         assert_eq!(
             error.to_string(),
-            "the selected prompt is a steer and cannot be branched independently"
+            "the selected prompt is a steer and cannot be edited independently"
         );
     }
 
     #[test]
-    fn backtrack_fork_before_turn_id_rejects_in_progress_and_missing_prompts() {
+    fn backtrack_before_turn_id_rejects_in_progress_and_missing_prompts() {
         let turns = vec![turn(
             "turn-1",
             TurnStatus::InProgress,
@@ -791,7 +792,7 @@ mod tests {
         )];
 
         assert_eq!(
-            backtrack_fork_before_turn_id(
+            backtrack_before_turn_id(
                 &turns,
                 /*nth_user_message*/ 0,
                 &mut prompt("turn-1-prompt-0"),
@@ -801,7 +802,7 @@ mod tests {
             "the selected prompt belongs to a turn that is still in progress"
         );
         assert_eq!(
-            backtrack_fork_before_turn_id(
+            backtrack_before_turn_id(
                 &turns,
                 /*nth_user_message*/ 1,
                 &mut prompt("missing prompt"),
@@ -817,7 +818,7 @@ mod tests {
             /*user_messages*/ 1,
         )];
         assert_eq!(
-            backtrack_fork_before_turn_id(
+            backtrack_before_turn_id(
                 &completed_turns,
                 /*nth_user_message*/ 0,
                 &mut prompt("different prompt"),
@@ -829,7 +830,7 @@ mod tests {
     }
 
     #[test]
-    fn backtrack_fork_before_turn_id_skips_hidden_review_prompts() {
+    fn backtrack_before_turn_id_skips_hidden_review_prompts() {
         let mut review_turn = turn(
             "turn-review",
             TurnStatus::Completed,
@@ -853,7 +854,7 @@ mod tests {
         ];
 
         assert_eq!(
-            backtrack_fork_before_turn_id(
+            backtrack_before_turn_id(
                 &turns,
                 /*nth_user_message*/ 1,
                 &mut prompt("turn-2-prompt-0"),
@@ -864,7 +865,7 @@ mod tests {
     }
 
     #[test]
-    fn backtrack_fork_before_turn_id_skips_hidden_nested_review_prompts() {
+    fn backtrack_before_turn_id_skips_hidden_nested_review_prompts() {
         let review_hint = "current changes";
         let review_prompt =
             "Review the current code changes (staged, unstaged, and untracked files).";
@@ -922,7 +923,7 @@ mod tests {
         ];
 
         assert_eq!(
-            backtrack_fork_before_turn_id(
+            backtrack_before_turn_id(
                 &turns,
                 /*nth_user_message*/ 0,
                 &mut prompt("turn-2-prompt-0"),
@@ -933,7 +934,7 @@ mod tests {
     }
 
     #[test]
-    fn backtrack_fork_before_turn_id_restores_canonical_mention_bindings() {
+    fn backtrack_before_turn_id_restores_canonical_mention_bindings() {
         let mut selected_turn = turn("turn-2", TurnStatus::Completed, /*user_messages*/ 1);
         selected_turn.items = vec![ThreadItem::UserMessage {
             id: "selected-prompt".to_string(),
@@ -964,12 +965,8 @@ mod tests {
         let mut selected_prompt = prompt("use $skill @sample $google-calendar");
 
         assert_eq!(
-            backtrack_fork_before_turn_id(
-                &turns,
-                /*nth_user_message*/ 1,
-                &mut selected_prompt,
-            )
-            .expect("the selected prompt should resolve"),
+            backtrack_before_turn_id(&turns, /*nth_user_message*/ 1, &mut selected_prompt,)
+                .expect("the selected prompt should resolve"),
             Some("turn-2".to_string())
         );
         assert_eq!(

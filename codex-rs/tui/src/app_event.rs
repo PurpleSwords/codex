@@ -439,8 +439,8 @@ pub(crate) enum AppEvent {
         name: Option<String>,
     },
 
-    /// Branch before a selected prompt and reopen it in the new thread's composer.
-    ForkSessionForPromptEdit {
+    /// Revert before a selected prompt and reopen it in the same thread's composer.
+    RevertSessionForPromptEdit {
         thread_id: ThreadId,
         nth_user_message: usize,
         prompt: UserMessage,
