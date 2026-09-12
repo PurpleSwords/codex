@@ -1,9 +1,12 @@
 use super::*;
 use crate::ModelsManagerConfig;
 use crate::manager::StaticModelsManager;
-use codex_http_client::DEFAULT_HTTP_CLIENT_FACTORY;
+use codex_http_client::OutboundProxyPolicy;
 use pretty_assertions::assert_eq;
 use serde_json::json;
+
+const DEFAULT_HTTP_CLIENT_FACTORY: HttpClientFactory =
+    HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault);
 
 fn model(slug: &str) -> ModelInfo {
     let mut model = crate::bundled_models_response()
