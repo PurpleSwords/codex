@@ -75,6 +75,8 @@ x-role-provider = "child"
 "#
     );
     let use_v2 = namespace == "collaboration";
+    // Disabling the V2 feature does not override the model's V2 metadata.
+    let parent_model = if use_v2 { "gpt-5.6-terra" } else { "gpt-5.2" };
     let test = test_codex()
         .with_config(move |config| {
             config
@@ -92,7 +94,7 @@ x-role-provider = "child"
                     .disable(Feature::MultiAgentV2)
                     .expect("disable v2");
             }
-            config.model = Some("gpt-5.6-terra".to_string());
+            config.model = Some(parent_model.to_string());
             let role_path = config.codex_home.join("custom-role.toml");
             std::fs::write(&role_path, &role_config).expect("write role config");
             config.agent_roles.insert(
@@ -107,7 +109,8 @@ x-role-provider = "child"
         .build_with_auto_env(&parent_server)
         .await?;
     let parent_provider = test.codex.config().await.model_provider.clone();
-    test.submit_turn("Delegate the check to the custom agent.")
+    // Keep the configured permissions: submit_turn overrides them for this turn.
+    test.submit_text_turn("Delegate the check to the custom agent.")
         .await?;
     let child_request = timeout(Duration::from_secs(/*secs*/ 10), async {
         loop {
@@ -148,7 +151,7 @@ x-role-provider = "child"
             .iter()
             .map(|request| request.body_json()["model"].clone())
             .collect::<Vec<_>>(),
-        vec![json!("gpt-5.6-terra"); 2]
+        vec![json!(parent_model); 2]
     );
     child.shutdown_and_wait().await?;
     assert_eq!(child_requests.requests().len(), 1);
