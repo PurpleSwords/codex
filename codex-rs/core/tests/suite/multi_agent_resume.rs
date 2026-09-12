@@ -1,3 +1,4 @@
+use anyhow::Context;
 use anyhow::Result;
 use codex_core::TurnInputRequest;
 use codex_core::config::AgentRoleConfig;
@@ -24,6 +25,7 @@ use serde_json::json;
 use std::time::Duration;
 use tokio::time::Instant;
 use tokio::time::sleep;
+use tokio::time::timeout;
 
 const COLLABORATION_NAMESPACE: &str = "collaboration";
 const SPAWN_CALL_ID: &str = "spawn-worker";
@@ -285,7 +287,11 @@ async fn cold_root_resume_restores_agent_identity_and_role_on_followup() -> Resu
         }
         sleep(Duration::from_millis(10)).await;
     };
-    let worker_thread = initial.thread_manager.get_thread(worker_thread_id).await?;
+    let worker_thread = initial
+        .thread_manager
+        .get_thread(worker_thread_id)
+        .await
+        .context("looking up the initially spawned worker")?;
     wait_for_event(worker_thread.as_ref(), |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
@@ -332,7 +338,7 @@ async fn cold_root_resume_restores_agent_identity_and_role_on_followup() -> Resu
         &sibling_spawn_args,
     )
     .await;
-    mount_sse_once_match(
+    let sibling_request = mount_sse_once_match(
         &server,
         |request: &wiremock::Request| {
             request_has_model(request, ROLE_MODEL)
@@ -348,16 +354,42 @@ async fn cold_root_resume_restores_agent_identity_and_role_on_followup() -> Resu
     .await;
     initial.submit_turn(SIBLING_PROMPT).await?;
 
-    let grandchild = nested_mock.last_request().expect("grandchild").body_json();
-    let nested_id = &grandchild["client_metadata"]["thread_id"];
-    let sibling_thread_id = initial
-        .thread_manager
-        .list_thread_ids()
+    // ResponseMock also captures requests examined before its custom matcher
+    // rejects them. Wait for each agent's identity instead of treating the last
+    // captured request as the grandchild and guessing the sibling by exclusion.
+    let mut agent_requests = Vec::new();
+    for (mock, agent_name) in [
+        (&nested_mock, "/root/worker/grandchild"),
+        (&sibling_request, "/root/survivor"),
+    ] {
+        let request = timeout(Duration::from_secs(/*secs*/ 10), async {
+            loop {
+                if let Some(request) = mock.requests().into_iter().find(|request| {
+                    request.body_json()["client_metadata"]["x-codex-turn-metadata"]
+                        .as_str()
+                        .and_then(|text| serde_json::from_str::<Value>(text).ok())
+                        .is_some_and(|metadata| metadata["agent_name"] == agent_name)
+                }) {
+                    break request.body_json();
+                }
+                sleep(Duration::from_millis(/*millis*/ 10)).await;
+            }
+        })
         .await
-        .into_iter()
-        .find(|id| ![root_thread_id, worker_thread_id].contains(id) && &json!(id) != nested_id)
-        .ok_or_else(|| anyhow::anyhow!("spawned sibling should be registered"))?;
-    let sibling_thread = initial.thread_manager.get_thread(sibling_thread_id).await?;
+        .with_context(|| format!("waiting for initial request from {agent_name}"))?;
+        agent_requests.push(request);
+    }
+    let grandchild = agent_requests[0].clone();
+    let sibling_thread_id = codex_protocol::ThreadId::from_string(
+        agent_requests[1]["client_metadata"]["thread_id"]
+            .as_str()
+            .context("sibling thread id")?,
+    )?;
+    let sibling_thread = initial
+        .thread_manager
+        .get_thread(sibling_thread_id)
+        .await
+        .context("looking up the initially spawned sibling")?;
     wait_for_event(sibling_thread.as_ref(), |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })

@@ -150,7 +150,7 @@ jobs:
           for round in {1..20}; do
             echo "Integration race round $round/20"
             just test --locked -p codex-core --test all \
-              -E 'test(websocket_turn_state_persists_within_turn_and_resets_after) | test(grandchild_full_fork_preserves_context_baseline)' \
+              -E 'test(websocket_turn_state_persists_within_turn_and_resets_after) | test(grandchild_full_fork_preserves_context_baseline) | test(cold_root_resume_restores_agent_identity_and_role_on_followup)' \
               --retries=0
           done
       - name: Test TUI library
