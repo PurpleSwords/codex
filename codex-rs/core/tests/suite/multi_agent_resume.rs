@@ -356,7 +356,10 @@ async fn cold_root_resume_restores_agent_identity_and_role_on_followup() -> Resu
         ]),
     )
     .await;
-    initial.submit_turn(SIBLING_PROMPT).await?;
+    initial
+        .submit_turn(SIBLING_PROMPT)
+        .await
+        .context("submitting the initial sibling turn")?;
 
     // ResponseMock also captures requests examined before its custom matcher
     // rejects them. Wait for each agent's identity instead of treating the last
@@ -457,7 +460,10 @@ async fn cold_root_resume_restores_agent_identity_and_role_on_followup() -> Resu
     let mut resume_builder = test_codex().with_config(move |config| {
         configure_multi_agent_v2_with_role(config, &resumed_model_provider_base_url);
     });
-    let resumed = resume_builder.restart(&server, &initial).await?;
+    let resumed = resume_builder
+        .restart(&server, &initial)
+        .await
+        .with_context(|| format!("cold restarting root {root_thread_id}"))?;
     drop(initial);
     assert_eq!(
         resumed.thread_manager.list_thread_ids().await,
@@ -514,7 +520,10 @@ wire_api = "responses"
         ]),
     )
     .await;
-    resumed.submit_turn(QUEUE_PROMPT).await?;
+    resumed
+        .submit_turn(QUEUE_PROMPT)
+        .await
+        .context("queueing a message after cold restart")?;
 
     let reloaded_worker = resumed
         .thread_manager
@@ -526,7 +535,10 @@ wire_api = "responses"
         worker_provider,
         "cold reload must restore the child's selected provider",
     );
-    resumed.submit_turn(FOLLOWUP_PROMPT).await?;
+    resumed
+        .submit_turn(FOLLOWUP_PROMPT)
+        .await
+        .context("starting the reloaded worker follow-up")?;
     wait_for_event(reloaded_worker.as_ref(), |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
@@ -631,7 +643,10 @@ wire_api = "responses"
         &interrupt_args,
     )
     .await;
-    resumed.submit_turn(INTERRUPT_PROMPT).await?;
+    resumed
+        .submit_turn(INTERRUPT_PROMPT)
+        .await
+        .context("interrupting the stopped worker")?;
     assert!(
         resumed
             .thread_manager
@@ -666,7 +681,10 @@ wire_api = "responses"
         ]),
     )
     .await;
-    resumed.submit_turn(SIBLING_FOLLOWUP_PROMPT).await?;
+    resumed
+        .submit_turn(SIBLING_FOLLOWUP_PROMPT)
+        .await
+        .context("starting the surviving sibling follow-up")?;
 
     let surviving_sibling = resumed
         .thread_manager
