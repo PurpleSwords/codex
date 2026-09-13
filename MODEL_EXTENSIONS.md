@@ -17,9 +17,7 @@ For example, to change only a known model's label:
 
 ```json
 {
-  "models": [
-    {"slug": "existing-model-id", "display_name": "My local label"}
-  ]
+  "models": [{ "slug": "existing-model-id", "display_name": "My local label" }]
 }
 ```
 
