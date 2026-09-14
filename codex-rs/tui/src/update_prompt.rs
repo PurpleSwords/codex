@@ -12,6 +12,7 @@ use crate::tui::Tui;
 use crate::tui::TuiEvent;
 use crate::update_action::UpdateAction;
 use crate::updates;
+use codex_install_context::distribution::Distribution;
 use color_eyre::Result;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
@@ -25,8 +26,6 @@ use ratatui::text::Line;
 use ratatui::widgets::Clear;
 use ratatui::widgets::WidgetRef;
 use tokio_stream::StreamExt;
-
-const RELEASE_NOTES_URL: &str = "https://github.com/openai/codex/releases/latest";
 
 pub(crate) enum UpdatePromptOutcome {
     Continue,
@@ -111,7 +110,9 @@ impl UpdatePromptScreen {
         Self {
             request_frame,
             latest_version,
-            current_version: env!("CARGO_PKG_VERSION").to_string(),
+            current_version: Distribution::current()
+                .current_version(env!("CARGO_PKG_VERSION"))
+                .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string()),
             update_action,
             highlighted: UpdateSelection::UpdateNow,
             selection: None,
@@ -186,6 +187,7 @@ impl UpdateSelection {
 
 impl WidgetRef for &UpdatePromptScreen {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
+        let release_notes_url = Distribution::current().release_notes_url();
         Clear.render(area, buf);
         let mut column = ColumnRenderable::new();
 
@@ -207,7 +209,7 @@ impl WidgetRef for &UpdatePromptScreen {
         column.push(
             Line::from(vec![
                 "Release notes: ".dim(),
-                RELEASE_NOTES_URL.dim().underlined(),
+                release_notes_url.dim().underlined(),
             ])
             .inset(Insets::tlbr(0, 2, 0, 0)),
         );
@@ -237,7 +239,7 @@ impl WidgetRef for &UpdatePromptScreen {
             .inset(Insets::tlbr(0, 2, 0, 0)),
         );
         column.render(area, buf);
-        crate::terminal_hyperlinks::mark_underlined_hyperlink(buf, area, RELEASE_NOTES_URL);
+        crate::terminal_hyperlinks::mark_underlined_hyperlink(buf, area, release_notes_url);
     }
 }
 

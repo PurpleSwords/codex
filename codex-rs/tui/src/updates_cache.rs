@@ -15,10 +15,11 @@ pub(crate) struct VersionInfo {
     pub(crate) dismissed_version: Option<String>,
 }
 
-const VERSION_FILENAME: &str = "version.json";
-
 pub(crate) fn version_filepath(config: &Config) -> PathBuf {
-    config.codex_home.join(VERSION_FILENAME).into_path_buf()
+    config
+        .codex_home
+        .join(codex_install_context::distribution::Distribution::current().version_filename())
+        .into_path_buf()
 }
 
 pub(crate) fn read_version_info(version_file: &Path) -> anyhow::Result<VersionInfo> {

@@ -1,6 +1,7 @@
 //! Informational, warning, update, and policy notice history cells.
 
 use super::*;
+use codex_install_context::distribution::Distribution;
 
 #[cfg_attr(not(test), allow(dead_code))]
 const RECAP_HEADING: &str = "Conversation recap";
@@ -8,6 +9,8 @@ const RECAP_HEADING: &str = "Conversation recap";
 #[cfg_attr(debug_assertions, allow(dead_code))]
 #[derive(Debug)]
 pub(crate) struct UpdateAvailableHistoryCell {
+    distribution: Distribution,
+    current_version: String,
     latest_version: String,
     update_action: Option<UpdateAction>,
 }
@@ -15,7 +18,12 @@ pub(crate) struct UpdateAvailableHistoryCell {
 #[cfg_attr(debug_assertions, allow(dead_code))]
 impl UpdateAvailableHistoryCell {
     pub(crate) fn new(latest_version: String, update_action: Option<UpdateAction>) -> Self {
+        let distribution = Distribution::current();
         Self {
+            distribution,
+            current_version: distribution
+                .current_version(CODEX_CLI_VERSION)
+                .unwrap_or_else(|| CODEX_CLI_VERSION.to_string()),
             latest_version,
             update_action,
         }
@@ -27,11 +35,17 @@ impl HistoryCell for UpdateAvailableHistoryCell {
         use ratatui_macros::line;
         use ratatui_macros::text;
         let update_instruction = if let Some(update_action) = self.update_action {
-            line!["Run ", update_action.command_str().cyan(), " to update."]
+            line![
+                "Run ",
+                update_action
+                    .command_str_for_distribution(self.distribution)
+                    .cyan(),
+                " to update."
+            ]
         } else {
             line![
                 "See ",
-                "https://github.com/openai/codex".cyan().underlined(),
+                self.distribution.repository_url().cyan().underlined(),
                 " for installation options."
             ]
         };
@@ -41,14 +55,12 @@ impl HistoryCell for UpdateAvailableHistoryCell {
                 "✨\u{200A}".bold().cyan(),
                 "Update available!".bold().cyan(),
                 " ",
-                format!("{CODEX_CLI_VERSION} -> {}", self.latest_version).bold(),
+                format!("{} -> {}", self.current_version, self.latest_version).bold(),
             ],
             update_instruction,
             "",
             "See full release notes:",
-            "https://github.com/openai/codex/releases/latest"
-                .cyan()
-                .underlined(),
+            self.distribution.release_notes_url().cyan().underlined(),
         ];
 
         let inner_width = content
@@ -61,17 +73,26 @@ impl HistoryCell for UpdateAvailableHistoryCell {
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
         let update_instruction = if let Some(update_action) = self.update_action {
-            format!("Run {} to update.", update_action.command_str())
+            format!(
+                "Run {} to update.",
+                update_action.command_str_for_distribution(self.distribution)
+            )
         } else {
-            "See https://github.com/openai/codex for installation options.".to_string()
+            format!(
+                "See {} for installation options.",
+                self.distribution.repository_url()
+            )
         };
         vec![
             Line::from("Update available!"),
-            Line::from(format!("{CODEX_CLI_VERSION} -> {}", self.latest_version)),
+            Line::from(format!(
+                "{} -> {}",
+                self.current_version, self.latest_version
+            )),
             Line::from(update_instruction),
             Line::from(""),
             Line::from("See full release notes:"),
-            Line::from("https://github.com/openai/codex/releases/latest"),
+            Line::from(self.distribution.release_notes_url()),
         ]
     }
 
@@ -83,6 +104,10 @@ impl HistoryCell for UpdateAvailableHistoryCell {
         self.display_hyperlink_lines(width)
     }
 }
+#[cfg(test)]
+#[path = "notices_fork_tests.rs"]
+mod fork_tests;
+
 #[allow(clippy::disallowed_methods)]
 pub(crate) fn new_warning_event(message: String) -> PrefixedWrappedHistoryCell {
     PrefixedWrappedHistoryCell::new(message.yellow(), "⚠ ".yellow(), "  ")
