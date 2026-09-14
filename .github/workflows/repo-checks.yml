@@ -2,6 +2,7 @@ name: repo-checks
 
 on:
   workflow_call:
+  workflow_dispatch:
 
 jobs:
   build-test:
@@ -47,6 +48,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Test npm package identity and isolated installation
+        run: python3 -m unittest discover -s codex-cli/scripts -p 'test_*.py'
 
       - name: Ensure root README.md contains only ASCII and certain Unicode code points
         run: ./scripts/asciicheck.py README.md
