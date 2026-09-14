@@ -243,6 +243,11 @@ const env = {
   CODEX_MANAGED_PACKAGE_ROOT: codexPackageRoot,
   CODEX_NPM_PACKAGE_NAME: codexNpmName,
 };
+// The package revision is distinct from the native CLI's upstream/protocol version.
+delete env.CODEX_NPM_PACKAGE_VERSION;
+if (typeof codexPackageJson.version === "string") {
+  env.CODEX_NPM_PACKAGE_VERSION = codexPackageJson.version;
+}
 const repositoryUrl =
   typeof codexPackageJson.repository === "string"
     ? codexPackageJson.repository

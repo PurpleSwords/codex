@@ -17,7 +17,11 @@ REPO_ROOT = CODEX_CLI_ROOT.parent
 RESPONSES_API_PROXY_NPM_ROOT = REPO_ROOT / "codex-rs" / "responses-api-proxy" / "npm"
 CODEX_SDK_ROOT = REPO_ROOT / "sdk" / "typescript"
 CODEX_NPM_NAME = "@openai/codex"
+FORK_NPM_NAME = "@purplesword/codex"
 CODEX_PACKAGE_COMPONENT = "codex-package"
+NUMBER_PATTERN = r"(?:0|[1-9][0-9]*)"
+BASE_VERSION_PATTERN = rf"{NUMBER_PATTERN}\.{NUMBER_PATTERN}\.{NUMBER_PATTERN}"
+FORK_VERSION_PATTERN = re.compile(rf"({BASE_VERSION_PATTERN})-fork\.([1-9][0-9]*)")
 NPM_NAME_PATTERN = re.compile(r"(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*")
 
 CODEX_PLATFORM_PACKAGES: dict[str, dict[str, str]] = {
@@ -270,6 +274,11 @@ def stage_sources(
 ) -> None:
     package_json: dict
     package_json_path: Path | None = None
+    upstream_version = None
+    if npm_name == FORK_NPM_NAME:
+        upstream_version = validate_fork_version(
+            version, REPO_ROOT / "codex-rs" / "Cargo.toml"
+        )
 
     if package == "codex":
         bin_dir = staging_dir / "bin"
@@ -362,9 +371,66 @@ def stage_sources(
         dependencies[npm_name] = version
         package_json["dependencies"] = dependencies
 
+    if upstream_version is not None:
+        package_json["codexUpstreamVersion"] = upstream_version
+
     with open(staging_dir / "package.json", "w", encoding="utf-8") as out:
         json.dump(package_json, out, indent=2)
         out.write("\n")
+
+
+def fork_version_key(version: str) -> tuple[int, int, int, int]:
+    """Order fork root releases by upstream version, then numeric fork revision.
+
+    Platform payload versions and general SemVer prereleases are not root releases.
+    """
+    match = FORK_VERSION_PATTERN.fullmatch(version)
+    if match is None:
+        raise ValueError("Expected <upstream-version>-fork.<positive-revision>")
+    major, minor, patch = map(int, match[1].split("."))
+    revision = int(match[2])
+    if any(value > 2**64 - 1 for value in (major, minor, patch, revision)):
+        raise ValueError("Version components must fit unsigned 64-bit integers")
+    return major, minor, patch, revision
+
+
+def is_newer_fork_release(latest: str, current: str) -> bool:
+    """Fork-only ordering, including migration from the previously published 0.153.4.
+
+    This is deliberately not npm/SemVer precedence and must not compare official
+    installations. The runtime updater will need the same scoped policy.
+    """
+    current_key = (0, 153, 4, 0) if current == "0.153.4" else fork_version_key(current)
+    return fork_version_key(latest) > current_key
+
+
+def validate_fork_version(version: str, workspace_manifest: Path) -> str:
+    """Validate distribution metadata without changing the compiled upstream version."""
+    major, minor, patch, _ = fork_version_key(version)
+    base_version = f"{major}.{minor}.{patch}"
+    if base_version == "0.0.0":
+        raise ValueError("Source-build version 0.0.0 cannot be a fork release baseline")
+    workspace_version = read_workspace_version(workspace_manifest)
+    if workspace_version != base_version:
+        raise ValueError(
+            f"Fork version {version} does not match the workspace baseline {workspace_version}"
+        )
+    return base_version
+
+
+def read_workspace_version(workspace_manifest: Path) -> str:
+    source = workspace_manifest.read_text(encoding="utf-8")
+    # Read only the canonical workspace.package version. Keep Python 3.10 support
+    # without introducing a TOML dependency or rewriting Cargo.toml/Cargo.lock.
+    section = re.search(r"(?ms)^\[workspace\.package\]\s*\n(.*?)(?=^\[|\Z)", source)
+    versions = (
+        re.findall(r'^version\s*=\s*"([^"\n]+)"\s*$', section[1], re.MULTILINE)
+        if section
+        else []
+    )
+    if len(versions) != 1 or re.fullmatch(BASE_VERSION_PATTERN, versions[0]) is None:
+        raise ValueError("Expected one stable upstream version in [workspace.package]")
+    return versions[0]
 
 
 def compute_platform_package_version(version: str, platform_tag: str) -> str:

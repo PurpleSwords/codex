@@ -18,7 +18,10 @@ builder = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(builder)
 FORK_NAME = "@purplesword/codex"
 REPOSITORY = "git+https://github.com/PurpleSwords/codex.git"
-VERSION = "0.153.4"
+UPSTREAM_VERSION = builder.read_workspace_version(
+    builder.REPO_ROOT / "codex-rs" / "Cargo.toml"
+)
+VERSION = f"{UPSTREAM_VERSION}-fork.1"
 
 
 class ForkNpmTests(unittest.TestCase):
@@ -51,7 +54,7 @@ class ForkNpmTests(unittest.TestCase):
         directory.mkdir(parents=True)
         builder.stage_sources(
             directory,
-            VERSION,
+            VERSION if name == FORK_NAME else UPSTREAM_VERSION,
             package,
             npm_name=name,
             repository_url=REPOSITORY if name == FORK_NAME else None,
@@ -64,8 +67,9 @@ class ForkNpmTests(unittest.TestCase):
             with self.subTest(name=name):
                 directory = self.root / name.replace("/", "-")
                 manifest = self.stage(directory, name=name)
+                version = VERSION if name == FORK_NAME else UPSTREAM_VERSION
                 expected = {
-                    f"{name}-{tag}": f"npm:{name}@{VERSION}-{tag}"
+                    f"{name}-{tag}": f"npm:{name}@{version}-{tag}"
                     for tag in (
                         "linux-x64",
                         "linux-arm64",
@@ -76,8 +80,12 @@ class ForkNpmTests(unittest.TestCase):
                     )
                 }
                 self.assertEqual(manifest["name"], name)
-                self.assertEqual(manifest["version"], VERSION)
+                self.assertEqual(manifest["version"], version)
                 self.assertEqual(manifest["optionalDependencies"], expected)
+                if name == FORK_NAME:
+                    self.assertEqual(manifest["codexUpstreamVersion"], UPSTREAM_VERSION)
+                else:
+                    self.assertNotIn("codexUpstreamVersion", manifest)
 
     def test_all_platform_tarballs_preserve_native_layout_and_attribution(self):
         for package, config in builder.CODEX_PLATFORM_PACKAGES.items():
@@ -110,6 +118,7 @@ class ForkNpmTests(unittest.TestCase):
                     ),
                 )
                 self.assertEqual(manifest["repository"]["url"], REPOSITORY)
+                self.assertEqual(manifest["codexUpstreamVersion"], UPSTREAM_VERSION)
                 packed = json.loads(
                     self.run_command(
                         ["npm", "pack", "--json", "--ignore-scripts"], staging
@@ -180,12 +189,16 @@ class ForkNpmTests(unittest.TestCase):
         binary.write_text(
             "#!/usr/bin/env node\n"
             "console.log(JSON.stringify({name:process.env.CODEX_NPM_PACKAGE_NAME,"
+            "version:process.env.CODEX_NPM_PACKAGE_VERSION,"
             "repo:process.env.CODEX_GITHUB_REPOSITORY,args:process.argv.slice(2)}));\n"
             "process.exit(7);\n",
             encoding="utf-8",
         )
         binary.chmod(0o755)
-        env = self.env | {"CODEX_GITHUB_REPOSITORY": "stale/repository"}
+        env = self.env | {
+            "CODEX_GITHUB_REPOSITORY": "stale/repository",
+            "CODEX_NPM_PACKAGE_VERSION": "stale-version",
+        }
         result = self.run_command(
             ["node", str(installed / "bin" / "codex.js"), "--version", "two words"],
             expected=7,
@@ -195,6 +208,7 @@ class ForkNpmTests(unittest.TestCase):
             json.loads(result.stdout),
             {
                 "name": FORK_NAME,
+                "version": VERSION,
                 "repo": "PurpleSwords/codex",
                 "args": ["--version", "two words"],
             },
