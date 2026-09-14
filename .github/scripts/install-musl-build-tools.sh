@@ -243,8 +243,11 @@ if [[ "${TARGET}" == "aarch64-unknown-linux-musl" ]]; then
   cxxflags="${cxxflags} -Wno-error=frame-larger-than"
 fi
 
-echo "CFLAGS=${cflags}" >> "$GITHUB_ENV"
-echo "CXXFLAGS=${cxxflags}" >> "$GITHUB_ENV"
+# Host build dependencies use GNU compilers, not the musl/Clang toolchain.
+# cc-rs reads global flags for both kinds of builds, so keep target-only
+# warning options in its documented target-scoped environment variables.
+echo "CFLAGS_${TARGET//-/_}=${cflags}" >> "$GITHUB_ENV"
+echo "CXXFLAGS_${TARGET//-/_}=${cxxflags}" >> "$GITHUB_ENV"
 echo "CC=${cc}" >> "$GITHUB_ENV"
 echo "TARGET_CC=${cc}" >> "$GITHUB_ENV"
 target_cc_var="CC_${TARGET}"
