@@ -3,8 +3,25 @@ name: repo-checks
 on:
   workflow_call:
   workflow_dispatch:
+    inputs:
+      release_validation_version:
+        description: "Optional six-platform dry-run; empty runs only repo checks"
+        required: false
+        default: ""
+        type: string
 
 jobs:
+  # Bootstrap manual validation before the new workflow is on main. Normal
+  # PR/main invocations never start the release matrix.
+  release-validation:
+    if: github.event_name == 'workflow_dispatch' && inputs.release_validation_version != ''
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/fork-release.yml
+    with:
+      version: ${{ inputs.release_validation_version }}
+
   build-test:
     runs-on: ubuntu-latest
     timeout-minutes: 10

@@ -1,0 +1,202 @@
+name: fork-release
+
+# Validation only. There is deliberately no publish/tag/release switch.
+# Keep this filename for the eventual npm Trusted Publisher configuration.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Unpublished candidate, e.g. 0.153.4-fork.1 (validation only)"
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-release-validation-${{ github.ref }}-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - id: plan
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          python3 scripts/fork_release_validation.py plan --version "$VERSION" > release-plan.json
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo 'matrix={"include":[{"runner":"ubuntu-24.04","target":"x86_64-unknown-linux-musl","platform":"linux-x64"},{"runner":"ubuntu-24.04-arm","target":"aarch64-unknown-linux-musl","platform":"linux-arm64"},{"runner":"macos-15-intel","target":"x86_64-apple-darwin","platform":"darwin-x64"},{"runner":"macos-15","target":"aarch64-apple-darwin","platform":"darwin-arm64"},{"runner":"windows-2022","target":"x86_64-pc-windows-msvc","platform":"win32-x64"},{"runner":"windows-11-arm","target":"aarch64-pc-windows-msvc","platform":"win32-arm64"}]}' >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: release-plan
+          path: release-plan.json
+          retention-days: 7
+
+  build:
+    needs: prepare
+    name: Release build ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      TARGET: ${{ matrix.target }}
+      CODEX_REPO_ROOT: ${{ github.workspace }}
+      CODEX_FORK_VERSION: ${{ needs.prepare.outputs.version }}
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_RELEASE_DEBUG: "0"
+      CARGO_TARGET_DIR: ${{ runner.temp }}/codex-release-target
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+        with:
+          targets: ${{ matrix.target }}
+      - if: runner.os == 'Windows'
+        uses: ./.github/actions/setup-msvc-env
+        with:
+          target: ${{ matrix.target }}
+      - if: runner.os == 'Windows'
+        run: git config --global core.longpaths true
+      - if: runner.os == 'Linux'
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.14.0
+          use-cache: false
+      - if: runner.os == 'Linux'
+        name: Configure musl toolchain
+        working-directory: codex-rs
+        run: |
+          bash ../.github/scripts/install-musl-build-tools.sh
+          echo 'HOST_CC=gcc' >> "$GITHUB_ENV"
+          echo 'HOST_CXX=g++' >> "$GITHUB_ENV"
+          echo 'AWS_LC_SYS_NO_JITTER_ENTROPY=1' >> "$GITHUB_ENV"
+          no_jitter="AWS_LC_SYS_NO_JITTER_ENTROPY_${TARGET//-/_}"
+          echo "$no_jitter=1" >> "$GITHUB_ENV"
+      - uses: ./.github/actions/setup-rusty-v8
+        with:
+          target: ${{ matrix.target }}
+      - if: runner.os == 'Linux'
+        name: Build embedded sandbox helper and record digest
+        working-directory: codex-rs
+        run: |
+          set -euo pipefail
+          cargo build --locked --release --target "$TARGET" --bin bwrap
+          helper="$CARGO_TARGET_DIR/$TARGET/release/bwrap"
+          strip --strip-debug --strip-unneeded "$helper"
+          echo "CODEX_BWRAP_SHA256=$(sha256sum "$helper" | awk '{print $1}')" >> "$GITHUB_ENV"
+      - name: Build release CLI and companions
+        working-directory: codex-rs
+        run: |
+          set -euo pipefail
+          args=(--bin codex --bin codex-code-mode-host)
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            args+=(--bin codex-command-runner --bin codex-windows-sandbox-setup)
+            if [[ "$TARGET" == x86_64-pc-windows-msvc ]]; then
+              export LIBSQLITE3_FLAGS=SQLITE_DISABLE_INTRINSIC
+            fi
+          fi
+          cargo build --locked --release --target "$TARGET" "${args[@]}"
+      - name: Archive native package
+        working-directory: codex-rs
+        run: |
+          bash ../.github/scripts/build-codex-package-archive.sh \
+            --target "$TARGET" --bundle primary \
+            --entrypoint-dir "$CARGO_TARGET_DIR/$TARGET/release" \
+            --archive-dir "dist/$TARGET"
+          git diff --exit-code
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: ${{ matrix.target }}
+          path: codex-rs/dist/${{ matrix.target }}/codex-package-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  package:
+    needs: [prepare, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: "*-*-*"
+          path: artifacts
+      - name: Pack seven packages and dry-run publishing with provenance
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          node --version
+          npm --version
+          python3 scripts/fork_release_validation.py package \
+            --version "$VERSION" --artifacts-dir artifacts --output-dir dist/npm
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: npm-dist
+          path: dist/npm/*.tgz
+          if-no-files-found: error
+          retention-days: 7
+
+  install:
+    needs: [prepare, package]
+    name: Install and launch ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: npm-dist
+          path: npm-dist
+      - name: Verify npm aliases and native execution without public publication
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          PLATFORM: ${{ matrix.platform }}
+        run: python3 scripts/fork_release_smoke.py --directory npm-dist --version "$VERSION" --platform "$PLATFORM"
