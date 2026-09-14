@@ -16,6 +16,7 @@ use chrono::Utc;
 use codex_http_client::ClientRouteClass;
 use codex_http_client::HttpClientFactory;
 use codex_http_client::RouteAwareClientPool;
+use codex_install_context::distribution::Distribution;
 use codex_login::default_client::default_headers;
 use serde::Deserialize;
 use std::path::Path;
@@ -29,6 +30,8 @@ pub fn get_upgrade_version(config: &Config) -> Option<String> {
         return None;
     }
 
+    let distribution = Distribution::current();
+    let current_version = distribution.current_version(CODEX_CLI_VERSION)?;
     let action = update_action::get_update_action();
     let version_file = version_filepath(config);
     let info = read_version_info(&version_file).ok();
@@ -49,7 +52,14 @@ pub fn get_upgrade_version(config: &Config) -> Option<String> {
     }
 
     info.and_then(|info| {
-        if is_newer(&info.latest_version, CODEX_CLI_VERSION).unwrap_or(false) {
+        let newer = match distribution {
+            Distribution::Official => is_newer(&info.latest_version, &current_version),
+            Distribution::Fork => codex_install_context::distribution::is_newer_fork_release(
+                &info.latest_version,
+                &current_version,
+            ),
+        };
+        if newer.unwrap_or(false) {
             Some(info.latest_version)
         } else {
             None
@@ -81,36 +91,49 @@ async fn check_for_update(
         ClientRouteClass::Other,
     )
     .with_legacy_custom_ca_fallback();
-    let latest_version = match action {
-        Some(UpdateAction::BrewUpgrade) => {
-            let HomebrewCaskInfo { version } = client_pool
-                .get(HOMEBREW_CASK_API_URL)
-                .headers(default_headers())
-                .send()
-                .await?
-                .error_for_status()?
-                .json::<HomebrewCaskInfo>()
-                .await?;
-            version
-        }
-        Some(UpdateAction::NpmGlobalLatest)
-        | Some(UpdateAction::BunGlobalLatest)
-        | Some(UpdateAction::VitePlusGlobalLatest)
-        | Some(UpdateAction::PnpmGlobalLatest) => {
-            let latest_version = fetch_latest_github_release_version(&client_pool).await?;
-            let package_info = client_pool
-                .get(npm_registry::PACKAGE_URL)
-                .headers(default_headers())
-                .send()
-                .await?
-                .error_for_status()?
-                .json::<NpmPackageInfo>()
-                .await?;
-            npm_registry::ensure_version_ready(&package_info, &latest_version)?;
-            latest_version
-        }
-        Some(UpdateAction::StandaloneUnix) | Some(UpdateAction::StandaloneWindows) | None => {
-            fetch_latest_github_release_version(&client_pool).await?
+    let distribution = Distribution::current();
+    let latest_version = if distribution == Distribution::Fork {
+        let package_info = client_pool
+            .get(distribution.registry_url())
+            .headers(default_headers())
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<NpmPackageInfo>()
+            .await?;
+        npm_registry::ready_fork_version(&package_info)?
+    } else {
+        match action {
+            Some(UpdateAction::BrewUpgrade) => {
+                let HomebrewCaskInfo { version } = client_pool
+                    .get(HOMEBREW_CASK_API_URL)
+                    .headers(default_headers())
+                    .send()
+                    .await?
+                    .error_for_status()?
+                    .json::<HomebrewCaskInfo>()
+                    .await?;
+                version
+            }
+            Some(UpdateAction::NpmGlobalLatest)
+            | Some(UpdateAction::BunGlobalLatest)
+            | Some(UpdateAction::VitePlusGlobalLatest)
+            | Some(UpdateAction::PnpmGlobalLatest) => {
+                let latest_version = fetch_latest_github_release_version(&client_pool).await?;
+                let package_info = client_pool
+                    .get(distribution.registry_url())
+                    .headers(default_headers())
+                    .send()
+                    .await?
+                    .error_for_status()?
+                    .json::<NpmPackageInfo>()
+                    .await?;
+                npm_registry::ensure_version_ready(&package_info, &latest_version)?;
+                latest_version
+            }
+            Some(UpdateAction::StandaloneUnix) | Some(UpdateAction::StandaloneWindows) | None => {
+                fetch_latest_github_release_version(&client_pool).await?
+            }
         }
     };
 

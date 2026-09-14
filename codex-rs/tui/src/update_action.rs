@@ -43,6 +43,32 @@ impl UpdateAction {
 
     /// Returns the list of command-line arguments for invoking the update.
     pub fn command_args(self) -> (&'static str, &'static [&'static str]) {
+        self.command_args_for_distribution(
+            codex_install_context::distribution::Distribution::current(),
+        )
+    }
+
+    fn command_args_for_distribution(
+        self,
+        distribution: codex_install_context::distribution::Distribution,
+    ) -> (&'static str, &'static [&'static str]) {
+        if distribution == codex_install_context::distribution::Distribution::Fork {
+            match self {
+                Self::NpmGlobalLatest => {
+                    return ("npm", &["install", "-g", "@purplesword/codex@latest"]);
+                }
+                Self::BunGlobalLatest => {
+                    return ("bun", &["install", "-g", "@purplesword/codex@latest"]);
+                }
+                Self::VitePlusGlobalLatest => {
+                    return ("vp", &["install", "-g", "@purplesword/codex@latest"]);
+                }
+                Self::PnpmGlobalLatest => {
+                    return ("pnpm", &["add", "-g", "@purplesword/codex@latest"]);
+                }
+                Self::BrewUpgrade | Self::StandaloneUnix | Self::StandaloneWindows => {}
+            }
+        }
         match self {
             UpdateAction::NpmGlobalLatest => ("npm", &["install", "-g", "@openai/codex"]),
             UpdateAction::BunGlobalLatest => ("bun", &["install", "-g", "@openai/codex"]),
@@ -70,7 +96,16 @@ impl UpdateAction {
 
     /// Returns string representation of the command-line arguments for invoking the update.
     pub fn command_str(self) -> String {
-        let (command, args) = self.command_args();
+        self.command_str_for_distribution(
+            codex_install_context::distribution::Distribution::current(),
+        )
+    }
+
+    pub(crate) fn command_str_for_distribution(
+        self,
+        distribution: codex_install_context::distribution::Distribution,
+    ) -> String {
+        let (command, args) = self.command_args_for_distribution(distribution);
         shlex::try_join(std::iter::once(command).chain(args.iter().copied()))
             .unwrap_or_else(|_| format!("{command} {}", args.join(" ")))
     }
@@ -78,8 +113,32 @@ impl UpdateAction {
 
 #[cfg(not(debug_assertions))]
 pub fn get_update_action() -> Option<UpdateAction> {
-    UpdateAction::from_install_context(InstallContext::current())
+    let action = UpdateAction::from_install_context(InstallContext::current());
+    if codex_install_context::distribution::Distribution::current()
+        == codex_install_context::distribution::Distribution::Fork
+    {
+        match action {
+            Some(
+                UpdateAction::NpmGlobalLatest
+                | UpdateAction::BunGlobalLatest
+                | UpdateAction::VitePlusGlobalLatest
+                | UpdateAction::PnpmGlobalLatest,
+            ) => action,
+            Some(
+                UpdateAction::BrewUpgrade
+                | UpdateAction::StandaloneUnix
+                | UpdateAction::StandaloneWindows,
+            )
+            | None => None,
+        }
+    } else {
+        action
+    }
 }
+
+#[cfg(test)]
+#[path = "update_action_fork_tests.rs"]
+mod fork_tests;
 
 #[cfg(test)]
 mod tests {

@@ -19,6 +19,7 @@ use codex_http_client::ClientRouteClass;
 use codex_http_client::RouteAwareClientPool;
 use codex_install_context::InstallContext;
 use codex_install_context::InstallMethod;
+use codex_install_context::distribution::Distribution;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use http::Method;
 use serde::Deserialize;
@@ -39,7 +40,6 @@ use super::network;
 use super::npm_global_root_check;
 use super::run_command;
 
-const VERSION_FILE_NAME: &str = "version.json";
 const GITHUB_LATEST_RELEASE_URL: &str = "https://api.github.com/repos/openai/codex/releases/latest";
 const HOMEBREW_CASK_API_URL: &str = "https://formulae.brew.sh/api/cask/codex.json";
 #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
@@ -67,7 +67,8 @@ pub(super) fn updates_check(config: &Config) -> DoctorCheck {
         ),
         format!("update action: {}", update_action_label(&install_context)),
     ];
-    let version_file = config.codex_home.join(VERSION_FILE_NAME);
+    let distribution = Distribution::current();
+    let version_file = config.codex_home.join(distribution.version_filename());
     push_cached_version_details(&mut details, &version_file);
 
     let mut status = CheckStatus::Ok;
@@ -115,10 +116,31 @@ pub(super) fn updates_check(config: &Config) -> DoctorCheck {
     match fetch_latest_version(&install_context) {
         Ok(latest_version) => {
             details.push(format!("latest version: {latest_version}"));
-            if is_newer(&latest_version, env!("CARGO_PKG_VERSION")) == Some(true) {
-                details.push("latest version status: newer version is available".to_string());
-            } else {
-                details.push("latest version status: current version is not older".to_string());
+            let newer = distribution
+                .current_version(env!("CARGO_PKG_VERSION"))
+                .and_then(|current| match distribution {
+                    Distribution::Official => is_newer(&latest_version, &current),
+                    Distribution::Fork => {
+                        codex_install_context::distribution::is_newer_fork_release(
+                            &latest_version,
+                            &current,
+                        )
+                    }
+                });
+            match newer {
+                Some(true) => {
+                    details.push("latest version status: newer version is available".to_string())
+                }
+                Some(false) => {
+                    details.push("latest version status: current version is not older".to_string())
+                }
+                None => {
+                    status = status.max(CheckStatus::Warning);
+                    details.push(
+                        "latest version status: distribution versions could not be compared"
+                            .to_string(),
+                    );
+                }
             }
         }
         Err(err) => {
@@ -429,6 +451,17 @@ fn push_cached_version_details(details: &mut Vec<String>, version_file: &Path) {
 }
 
 fn update_action_label(context: &InstallContext) -> &'static str {
+    if Distribution::current() == Distribution::Fork {
+        return match &context.method {
+            InstallMethod::Npm => "npm install -g @purplesword/codex@latest",
+            InstallMethod::Bun => "bun install -g @purplesword/codex@latest",
+            InstallMethod::VitePlus => "vp install -g @purplesword/codex@latest",
+            InstallMethod::Pnpm => "pnpm add -g @purplesword/codex@latest",
+            InstallMethod::Brew | InstallMethod::Standalone { .. } | InstallMethod::Other => {
+                "manual or unknown"
+            }
+        };
+    }
     match &context.method {
         InstallMethod::Npm => "npm install -g @openai/codex",
         InstallMethod::Bun => "bun install -g @openai/codex",
@@ -441,6 +474,14 @@ fn update_action_label(context: &InstallContext) -> &'static str {
 }
 
 fn fetch_latest_version(context: &InstallContext) -> Result<String, String> {
+    if Distribution::current() == Distribution::Fork {
+        #[derive(Deserialize)]
+        struct NpmLatest {
+            version: String,
+        }
+        let url = format!("{}/latest", Distribution::Fork.registry_url());
+        return http_get_json::<NpmLatest>(&url).map(|info| info.version);
+    }
     match &context.method {
         InstallMethod::Brew => fetch_homebrew_cask_version(),
         InstallMethod::Npm

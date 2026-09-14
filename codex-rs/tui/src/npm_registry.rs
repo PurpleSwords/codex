@@ -1,9 +1,6 @@
 use serde::Deserialize;
 use std::collections::HashMap;
 
-#[cfg(not(debug_assertions))]
-pub(crate) const PACKAGE_URL: &str = "https://registry.npmjs.org/@openai%2fcodex";
-
 #[derive(Deserialize, Debug, Clone)]
 pub(crate) struct NpmPackageInfo {
     #[serde(rename = "dist-tags")]
@@ -14,6 +11,8 @@ pub(crate) struct NpmPackageInfo {
 #[derive(Deserialize, Debug, Clone)]
 struct NpmPackageVersionInfo {
     dist: Option<NpmPackageDist>,
+    #[serde(default, rename = "optionalDependencies")]
+    optional_dependencies: HashMap<String, String>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -67,6 +66,38 @@ fn version_info_with_dist<'a>(
     }
     Ok(info)
 }
+
+pub(crate) fn ready_fork_version(package_info: &NpmPackageInfo) -> anyhow::Result<String> {
+    let version = package_info
+        .dist_tags
+        .get("latest")
+        .ok_or_else(|| anyhow::anyhow!("npm package is missing latest dist-tag"))?;
+    if codex_install_context::distribution::is_newer_fork_release(version, version).is_none() {
+        anyhow::bail!("npm latest is not a fork root release");
+    }
+    let root = version_info_with_dist(package_info, version)?;
+    for platform in [
+        "linux-x64",
+        "linux-arm64",
+        "darwin-x64",
+        "darwin-arm64",
+        "win32-x64",
+        "win32-arm64",
+    ] {
+        let alias = format!("@purplesword/codex-{platform}");
+        let payload_version = format!("{version}-{platform}");
+        let expected = format!("npm:@purplesword/codex@{payload_version}");
+        if root.optional_dependencies.get(&alias) != Some(&expected) {
+            anyhow::bail!("fork root has an unexpected platform dependency: {alias}");
+        }
+        version_info_with_dist(package_info, &payload_version)?;
+    }
+    Ok(version.clone())
+}
+
+#[cfg(test)]
+#[path = "npm_registry_fork_tests.rs"]
+mod fork_tests;
 
 #[cfg(test)]
 mod tests {
