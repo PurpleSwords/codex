@@ -23,7 +23,6 @@ def observe(command, stream):
                     probe, capture_output=True, text=True, timeout=10
                 )
                 print(result.stdout, file=stream, flush=True)
-                print(result.stdout, flush=True)
             except (OSError, subprocess.TimeoutExpired) as error:
                 print(f"Resource probe failed: {error}", file=stream, flush=True)
         try:
