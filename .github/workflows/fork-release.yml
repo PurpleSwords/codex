@@ -84,7 +84,9 @@ jobs:
     needs: prepare
     name: ${{ inputs.diagnostic_platform != 'all' && 'Diagnostic build' || 'Release build' }} ${{ matrix.platform }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 120
+    # Intel macOS cold release builds have completed in ~118 minutes, before
+    # archive creation. Only this manual release job gets additional headroom.
+    timeout-minutes: ${{ matrix.platform == 'darwin-x64' && 180 || 120 }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
