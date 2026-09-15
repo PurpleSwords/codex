@@ -5,19 +5,29 @@ name: fork-release
 on:
   workflow_dispatch:
     inputs:
-      linux_arm64_only:
+      diagnostic_platform:
         description: "Diagnostic build only; skips packaging and installation validation"
-        type: boolean
-        default: false
+        type: choice
+        default: all
+        options:
+          [
+            all,
+            linux-x64,
+            linux-arm64,
+            darwin-x64,
+            darwin-arm64,
+            win32-x64,
+            win32-arm64,
+          ]
       version:
         description: "Unpublished candidate, e.g. 0.153.4-fork.1 (validation only)"
         required: true
         type: string
   workflow_call:
     inputs:
-      linux_arm64_only:
-        type: boolean
-        default: false
+      diagnostic_platform:
+        type: string
+        default: all
       version:
         required: true
         type: string
@@ -35,7 +45,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       version: ${{ steps.plan.outputs.version }}
-      matrix: ${{ steps.plan.outputs.matrix }}
+      matrix: ${{ steps.select.outputs.matrix }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -48,6 +58,22 @@ jobs:
           python3 scripts/fork_release_validation.py plan --version "$VERSION" > release-plan.json
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo 'matrix={"include":[{"runner":"ubuntu-24.04","target":"x86_64-unknown-linux-musl","platform":"linux-x64"},{"runner":"ubuntu-24.04-arm","target":"aarch64-unknown-linux-musl","platform":"linux-arm64"},{"runner":"macos-15-intel","target":"x86_64-apple-darwin","platform":"darwin-x64"},{"runner":"macos-15","target":"aarch64-apple-darwin","platform":"darwin-arm64"},{"runner":"windows-2022","target":"x86_64-pc-windows-msvc","platform":"win32-x64"},{"runner":"windows-11-arm","target":"aarch64-pc-windows-msvc","platform":"win32-arm64"}]}' >> "$GITHUB_OUTPUT"
+      - id: select
+        env:
+          MATRIX: ${{ steps.plan.outputs.matrix }}
+          PLATFORM: ${{ inputs.diagnostic_platform }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          matrix = json.loads(os.environ['MATRIX'])
+          platform = os.environ['PLATFORM']
+          if platform != 'all':
+              matrix['include'] = [row for row in matrix['include'] if row['platform'] == platform]
+              if len(matrix['include']) != 1:
+                  raise ValueError('Unknown diagnostic platform')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              print('matrix=' + json.dumps(matrix), file=output)
+          PY
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: release-plan
@@ -56,12 +82,12 @@ jobs:
 
   build:
     needs: prepare
-    name: ${{ inputs.linux_arm64_only && 'Diagnostic build' || 'Release build' }} ${{ matrix.platform }}
+    name: ${{ inputs.diagnostic_platform != 'all' && 'Diagnostic build' || 'Release build' }} ${{ matrix.platform }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
     strategy:
       fail-fast: false
-      matrix: ${{ inputs.linux_arm64_only && fromJSON('{"include":[{"runner":"ubuntu-24.04-arm","target":"aarch64-unknown-linux-musl","platform":"linux-arm64"}]}') || fromJSON(needs.prepare.outputs.matrix) }}
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     defaults:
       run:
         shell: bash
@@ -82,6 +108,12 @@ jobs:
           python-version: "3.12"
       - name: Configure temporary build output
         run: echo "CARGO_TARGET_DIR=$RUNNER_TEMP/codex-release-target" >> "$GITHUB_ENV"
+      - name: Use available Intel macOS cores (capped at four)
+        if: matrix.platform == 'darwin-x64'
+        run: |
+          cores="$(sysctl -n hw.logicalcpu)"
+          echo "CARGO_BUILD_JOBS=$(( cores < 4 ? cores : 4 ))" >> "$GITHUB_ENV"
+          sysctl hw.logicalcpu hw.memsize
       - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
         with:
           targets: ${{ matrix.target }}
@@ -129,7 +161,22 @@ jobs:
               export LIBSQLITE3_FLAGS=SQLITE_DISABLE_INTRINSIC
             fi
           fi
-          cargo build --locked --release --target "$TARGET" "${args[@]}"
+          if [[ "$TARGET" == x86_64-apple-darwin ]]; then
+            python3 ../scripts/macos_build_observer.py \
+              cargo build --locked --release --timings --target "$TARGET" "${args[@]}"
+          else
+            cargo build --locked --release --timings --target "$TARGET" "${args[@]}"
+          fi
+      - name: Upload build timings and resource observations
+        if: ${{ always() }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: diagnostics_${{ matrix.platform }}
+          path: |
+            ${{ env.CARGO_TARGET_DIR }}/cargo-timings/
+            ${{ runner.temp }}/macos-build-resources.log
+          if-no-files-found: warn
+          retention-days: 7
       - name: Archive native package
         working-directory: codex-rs
         run: |
@@ -146,7 +193,7 @@ jobs:
           retention-days: 7
 
   package:
-    if: ${{ !inputs.linux_arm64_only }}
+    if: inputs.diagnostic_platform == 'all'
     needs: [prepare, build]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
