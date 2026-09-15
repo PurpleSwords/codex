@@ -5,12 +5,19 @@ name: fork-release
 on:
   workflow_dispatch:
     inputs:
+      linux_arm64_only:
+        description: "Diagnostic build only; skips packaging and installation validation"
+        type: boolean
+        default: false
       version:
         description: "Unpublished candidate, e.g. 0.153.4-fork.1 (validation only)"
         required: true
         type: string
   workflow_call:
     inputs:
+      linux_arm64_only:
+        type: boolean
+        default: false
       version:
         required: true
         type: string
@@ -49,12 +56,12 @@ jobs:
 
   build:
     needs: prepare
-    name: Release build ${{ matrix.platform }}
+    name: ${{ inputs.linux_arm64_only && 'Diagnostic build' || 'Release build' }} ${{ matrix.platform }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+      matrix: ${{ inputs.linux_arm64_only && fromJSON('{"include":[{"runner":"ubuntu-24.04-arm","target":"aarch64-unknown-linux-musl","platform":"linux-arm64"}]}') || fromJSON(needs.prepare.outputs.matrix) }}
     defaults:
       run:
         shell: bash
@@ -139,6 +146,7 @@ jobs:
           retention-days: 7
 
   package:
+    if: ${{ !inputs.linux_arm64_only }}
     needs: [prepare, build]
     runs-on: ubuntu-24.04
     timeout-minutes: 20

@@ -4,6 +4,10 @@ on:
   workflow_call:
   workflow_dispatch:
     inputs:
+      release_linux_arm64_only:
+        description: "With a release version, run only the Linux ARM64 diagnostic build"
+        type: boolean
+        default: false
       release_validation_version:
         description: "Optional six-platform dry-run; empty runs only repo checks"
         required: false
@@ -21,6 +25,7 @@ jobs:
     uses: ./.github/workflows/fork-release.yml
     with:
       version: ${{ inputs.release_validation_version }}
+      linux_arm64_only: ${{ inputs.release_linux_arm64_only || false }}
 
   build-test:
     runs-on: ubuntu-latest
