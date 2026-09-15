@@ -5,6 +5,10 @@ name: fork-release
 on:
   workflow_dispatch:
     inputs:
+      cold_build:
+        description: "Do not restore or save Cargo caches (clean-build verification)"
+        type: boolean
+        default: false
       diagnostic_platform:
         description: "Diagnostic build only; skips packaging and installation validation"
         type: choice
@@ -25,6 +29,9 @@ on:
         type: string
   workflow_call:
     inputs:
+      cold_build:
+        type: boolean
+        default: false
       diagnostic_platform:
         type: string
         default: all
@@ -143,6 +150,35 @@ jobs:
       - uses: ./.github/actions/setup-rusty-v8
         with:
           target: ${{ matrix.target }}
+      # Cache scope is deliberately stricter than ordinary CI: only manual
+      # runs on main may read/write this namespace. Feature branches stay cold.
+      - name: Compute isolated release cache key
+        id: cache-key
+        if: ${{ !inputs.cold_build && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' }}
+        env:
+          RELEASE_CACHE_CONFIG: ${{ hashFiles('codex-rs/Cargo.lock', 'codex-rs/rust-toolchain.toml', 'codex-rs/**/Cargo.toml', 'codex-rs/.cargo/**', '.github/scripts/install-musl-build-tools.sh', '.github/actions/setup-msvc-env/**', '.github/actions/setup-rusty-v8/**', '.github/scripts/rusty_v8_bazel.py') }}
+        run: python3 scripts/fork_release_cache.py
+      - name: Restore Cargo downloads and release build outputs
+        id: cargo-cache
+        if: steps.cache-key.outcome == 'success'
+        uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ${{ env.CARGO_TARGET_DIR }}
+          key: ${{ steps.cache-key.outputs.key }}
+          restore-keys: ${{ steps.cache-key.outputs.prefix }}
+          enableCrossOsArchive: false
+      - name: Report cache selection
+        env:
+          CACHE_KEY: ${{ steps.cargo-cache.outputs.cache-matched-key }}
+        run: |
+          if [[ -n "$CACHE_KEY" ]]; then
+            echo "Restored release cache: $CACHE_KEY" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'No release cache restored (disabled, untrusted ref, or miss).' >> "$GITHUB_STEP_SUMMARY"
+          fi
       - if: runner.os == 'Linux'
         name: Build embedded sandbox helper and record digest
         working-directory: codex-rs
@@ -153,6 +189,7 @@ jobs:
           strip --strip-debug --strip-unneeded "$helper"
           echo "CODEX_BWRAP_SHA256=$(sha256sum "$helper" | awk '{print $1}')" >> "$GITHUB_ENV"
       - name: Build release CLI and companions
+        id: release-build
         working-directory: codex-rs
         run: |
           set -euo pipefail
@@ -169,6 +206,21 @@ jobs:
           else
             cargo build --locked --release --timings --target "$TARGET" "${args[@]}"
           fi
+      # Save immediately after a successful build, before packaging. A later
+      # packaging failure must not force another cold compilation. A cache
+      # write failure is not a product failure; all build/test gates remain.
+      - name: Save successful release build cache
+        if: ${{ success() && steps.release-build.outcome == 'success' && steps.cache-key.outcome == 'success' && steps.cargo-cache.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        timeout-minutes: 10
+        uses: actions/cache/save@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ${{ env.CARGO_TARGET_DIR }}
+          key: ${{ steps.cache-key.outputs.key }}
+          enableCrossOsArchive: false
       - name: Upload build timings and resource observations
         if: ${{ always() }}
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
