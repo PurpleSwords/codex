@@ -1,10 +1,14 @@
 name: fork-release
 
-# Validation only. There is deliberately no publish/tag/release switch.
-# Keep this filename for the eventual npm Trusted Publisher configuration.
+# Keep this filename for npm Trusted Publisher. Validation remains the default.
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: "Validate builds, check pinned artifacts, or publish the reviewed candidate"
+        type: choice
+        default: validate
+        options: [validate, promote-check, publish]
       cold_build:
         description: "Do not restore or save Cargo caches (clean-build verification)"
         type: boolean
@@ -24,7 +28,7 @@ on:
             win32-arm64,
           ]
       version:
-        description: "Unpublished candidate, e.g. 0.153.4-fork.1 (validation only)"
+        description: "Candidate version, e.g. 0.153.4-fork.1"
         required: true
         type: string
   workflow_call:
@@ -48,6 +52,7 @@ concurrency:
 
 jobs:
   prepare:
+    if: ${{ !inputs.mode || inputs.mode == 'validate' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
@@ -86,6 +91,41 @@ jobs:
           name: release-plan
           path: release-plan.json
           retention-days: 7
+
+  promote:
+    if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'promote-check' || (inputs.mode == 'publish' && github.ref == 'refs/heads/main')) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    concurrency:
+      group: fork-npm-publish
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Verify and promote reviewed tarballs (no rebuild)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          node --version
+          npm --version
+          args=()
+          if [[ "$RELEASE_MODE" == publish ]]; then args+=(--publish); fi
+          python3 scripts/fork_release_publish.py "${args[@]}"
 
   build:
     needs: prepare
