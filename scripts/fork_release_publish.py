@@ -141,7 +141,9 @@ def publish_packages(directory, version, previous_latest, *, execute):
             command.append("--dry-run")
         subprocess.run(command, check=True, timeout=300)
         if execute:
-            for attempt in range(6):
+            # npm can return success while the published version is still processing.
+            visibility_deadline = time.monotonic() + 10 * 60
+            while True:
                 observed = registry_metadata()
                 if existing_matches(
                     observed, item, packages[item]["dist"]["integrity"]
@@ -149,7 +151,7 @@ def publish_packages(directory, version, previous_latest, *, execute):
                     if observed["dist-tags"].get(tag) != item:
                         raise ValueError(f"Published dist-tag mismatch: {item}")
                     break
-                if attempt == 5:
+                if time.monotonic() >= visibility_deadline:
                     raise ValueError(
                         f"Published version not visible yet; inspect before retrying: {item}"
                     )

@@ -95,7 +95,8 @@ jobs:
   promote:
     if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'promote-check' || (inputs.mode == 'publish' && github.ref == 'refs/heads/main')) }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # Allow for registry processing of each of the seven checksum-pinned packages.
+    timeout-minutes: 90
     concurrency:
       group: fork-npm-publish
       cancel-in-progress: false
