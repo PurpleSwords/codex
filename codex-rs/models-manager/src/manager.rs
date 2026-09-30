@@ -216,6 +216,7 @@ pub type SharedModelsManager = Arc<dyn ModelsManager>;
 /// OpenAI-compatible model manager backed by bundled models, cache, and `/models`.
 #[derive(Debug)]
 pub struct OpenAiModelsManager {
+    fallback_models: Vec<ModelInfo>,
     remote_models: RwLock<Vec<ModelInfo>>,
     etag: RwLock<Option<String>>,
     cache: Option<Arc<dyn ModelsCache>>,
@@ -275,12 +276,21 @@ impl OpenAiModelsManager {
     ) -> Self {
         let remote_models = load_remote_models_from_file().unwrap_or_default();
         Self {
+            fallback_models: remote_models.clone(),
             remote_models: RwLock::new(remote_models),
             etag: RwLock::new(None),
             cache,
             endpoint_client,
             auth_manager,
         }
+    }
+
+    /// Set the initial catalog and merge fallback before starting model discovery.
+    /// Unlike a static catalog, this preserves remote refresh and cache behavior.
+    pub fn with_fallback_catalog(mut self, catalog: ModelsResponse) -> Self {
+        *self.remote_models.get_mut() = catalog.models.clone();
+        self.fallback_models = catalog.models;
+        self
     }
 }
 
@@ -460,7 +470,7 @@ impl OpenAiModelsManager {
             return;
         }
 
-        let mut existing_models = load_remote_models_from_file().unwrap_or_default();
+        let mut existing_models = self.fallback_models.clone();
         for model in models {
             if let Some(existing_index) = existing_models
                 .iter()

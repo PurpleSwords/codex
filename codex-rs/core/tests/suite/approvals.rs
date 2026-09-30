@@ -9,7 +9,7 @@ use codex_core::config::Constrained;
 use codex_core::config::ThreadStoreConfig;
 use codex_core::sandboxing::SandboxPermissions;
 use codex_features::Feature;
-use codex_models_manager::bundled_models_response;
+use codex_models_manager::test_support::test_models_response;
 use codex_protocol::approvals::NetworkApprovalProtocol;
 use codex_protocol::approvals::NetworkPolicyAmendment;
 use codex_protocol::approvals::NetworkPolicyRuleAction;
@@ -2029,7 +2029,7 @@ async fn run_scenario(scenario: &ScenarioSpec) -> Result<()> {
     let model = model_override.unwrap_or("gpt-5.4");
     let policy_src = scenario.action.policy_src();
     let thread_store_id = format!("approval-scenario-{}", scenario.name);
-    let model_catalog = bundled_models_response()?;
+    let model_catalog = test_models_response()?;
 
     let mut builder = test_codex().with_model(model).with_config(move |config| {
         config.model_catalog = Some(model_catalog);

@@ -56,10 +56,10 @@ use codex_login::auth::AgentIdentityAuthPolicy;
 use codex_model_provider::create_model_provider;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::built_in_model_providers;
-use codex_models_manager::bundled_models_response;
 use codex_models_manager::model_info;
 use codex_models_manager::test_support::construct_model_info_offline_for_tests;
 use codex_models_manager::test_support::get_model_offline_for_tests;
+use codex_models_manager::test_support::test_models_response;
 use codex_protocol::AgentPath;
 use codex_protocol::ResponseItemId;
 use codex_protocol::SessionId;
@@ -1624,7 +1624,7 @@ async fn get_base_instructions_no_user_content() {
     .expect("resolve prompt fixture path");
     let prompt_with_apply_patch_instructions =
         std::fs::read_to_string(prompt_path).expect("read prompt fixture");
-    let models_response = bundled_models_response()
+    let models_response = test_models_response()
         .unwrap_or_else(|err| panic!("bundled models.json should parse: {err}"));
     let model_info_for_slug = |slug: &str, config: &Config| {
         let model = models_response

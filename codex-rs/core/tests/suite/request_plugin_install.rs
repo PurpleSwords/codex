@@ -15,7 +15,7 @@ use codex_extension_api::McpServerContributionContext;
 use codex_extension_api::McpServerContributor;
 use codex_features::Feature;
 use codex_login::CodexAuth;
-use codex_models_manager::bundled_models_response;
+use codex_models_manager::test_support::test_models_response;
 use codex_protocol::approvals::ElicitationAction;
 use codex_protocol::approvals::ElicitationRequest;
 use codex_protocol::approvals::ElicitationRequestEvent;
@@ -132,7 +132,7 @@ fn configure_apps_without_search_tool(config: &mut Config, apps_base_url: &str) 
             .enable(feature)
             .expect("test config should allow feature update");
     }
-    let mut model_catalog = bundled_models_response()
+    let mut model_catalog = test_models_response()
         .unwrap_or_else(|err| panic!("bundled models.json should parse: {err}"));
     let model = model_catalog
         .models

@@ -6,8 +6,8 @@ use codex_core::config::Constrained;
 use codex_core::config::TokenBudgetConfig;
 use codex_features::Feature;
 use codex_login::CodexAuth;
-use codex_models_manager::bundled_models_response;
 use codex_models_manager::manager::RefreshStrategy;
+use codex_models_manager::test_support::test_models_response;
 use codex_protocol::config_types::ApprovalsReviewer;
 use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::config_types::ServiceTier;
@@ -64,7 +64,7 @@ const MODEL_C: &str = "step-settings-c";
 const TURN_STATE_HEADER: &str = "x-codex-turn-state";
 
 fn step_settings_models() -> Vec<ModelInfo> {
-    let model = bundled_models_response()
+    let model = test_models_response()
         .expect("bundled models should parse")
         .models
         .into_iter()

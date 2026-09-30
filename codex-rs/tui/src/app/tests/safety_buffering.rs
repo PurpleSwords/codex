@@ -168,6 +168,10 @@ async fn active_turn_interrupt_is_nonblocking_and_coalesces_repeated_requests() 
     let (server, _completions) = start_streaming_sse_server(vec![chunks]).await;
     let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
     let codex_home = tempdir()?;
+    app_test_support::write_models_cache_with_models(
+        codex_home.path(),
+        codex_models_manager::test_support::test_models_response()?.models,
+    )?;
     std::fs::write(
         codex_home.path().join("config.toml"),
         format!(
@@ -383,6 +387,10 @@ async fn run_safety_retry(
 
     let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
     let codex_home = tempdir()?;
+    app_test_support::write_models_cache_with_models(
+        codex_home.path(),
+        codex_models_manager::test_support::test_models_response()?.models,
+    )?;
     std::fs::write(
         codex_home.path().join("config.toml"),
         format!(

@@ -4,10 +4,10 @@ use codex_core::TurnInputRequest;
 use codex_login::CodexAuth;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::built_in_model_providers;
-use codex_models_manager::bundled_models_response;
 use codex_models_manager::manager::RefreshStrategy;
 use codex_models_manager::manager::SharedModelsManager;
 use codex_models_manager::model_info::BASE_INSTRUCTIONS;
+use codex_models_manager::test_support::test_models_response;
 use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::openai_models::ConfigShellToolType;
@@ -72,7 +72,7 @@ async fn disabled_update_plan_preserves_custom_catalog_instructions() -> Result<
         sse(vec![ev_response_created("resp-1"), ev_completed("resp-1")]),
     )
     .await;
-    let mut catalog = bundled_models_response()?;
+    let mut catalog = test_models_response()?;
     let model = catalog
         .models
         .iter_mut()
@@ -1417,7 +1417,7 @@ async fn wait_for_model_available(manager: &SharedModelsManager, slug: &str) -> 
 }
 
 fn bundled_model_slug() -> String {
-    let response = bundled_models_response().expect("bundled models.json should parse");
+    let response = test_models_response().expect("bundled models.json should parse");
     response
         .models
         .first()

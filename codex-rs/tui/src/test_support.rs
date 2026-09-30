@@ -2,7 +2,7 @@
 
 use std::sync::LazyLock;
 
-use codex_models_manager::bundled_models_response;
+use codex_models_manager::test_support::test_models_response;
 use codex_protocol::openai_models::ModelPreset;
 pub(crate) use codex_utils_absolute_path::test_support::PathBufExt;
 pub(crate) use codex_utils_absolute_path::test_support::test_path_buf;
@@ -10,7 +10,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 pub(crate) static TEST_MODEL_PRESETS: LazyLock<Vec<ModelPreset>> = LazyLock::new(|| {
-    let mut response = bundled_models_response()
+    let mut response = test_models_response()
         .unwrap_or_else(|err| panic!("bundled models.json should parse: {err}"));
     response.models.sort_by_key(|model| model.priority);
     let mut presets: Vec<ModelPreset> = response.models.into_iter().map(Into::into).collect();

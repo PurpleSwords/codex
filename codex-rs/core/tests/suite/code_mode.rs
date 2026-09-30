@@ -22,7 +22,7 @@ use codex_extension_api::ToolStartInput;
 use codex_features::CurrentTimeSource;
 use codex_features::Feature;
 use codex_login::CodexAuth;
-use codex_models_manager::bundled_models_response;
+use codex_models_manager::test_support::test_models_response;
 use codex_protocol::config_types::ApprovalsReviewer;
 use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
@@ -1380,7 +1380,7 @@ if (!tool) {
                 .enable(Feature::CodeModeOnly)
                 .expect("test config should allow feature update");
             let mut model_catalog =
-                bundled_models_response().expect("bundled models.json should parse");
+                test_models_response().expect("bundled models.json should parse");
             let model = model_catalog
                 .models
                 .iter_mut()

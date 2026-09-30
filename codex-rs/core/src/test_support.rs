@@ -15,13 +15,12 @@ use codex_http_client::HttpClientFactory;
 use codex_http_client::OutboundProxyPolicy;
 use codex_login::AuthManager;
 use codex_login::CodexAuth;
-use codex_model_provider::create_model_provider;
 use codex_model_provider_info::ModelProviderInfo;
-use codex_models_manager::bundled_models_response;
 use codex_models_manager::collaboration_mode_presets;
 use codex_models_manager::manager::SharedModelsManager;
 use codex_models_manager::test_support::construct_model_info_offline_for_tests;
 use codex_models_manager::test_support::get_model_offline_for_tests;
+use codex_models_manager::test_support::test_models_response;
 use codex_protocol::ThreadId;
 use codex_protocol::config_types::CollaborationModeMask;
 use codex_protocol::mcp::ClientMcpExtensions;
@@ -41,7 +40,7 @@ use crate::thread_manager;
 use crate::unified_exec;
 
 static TEST_MODEL_PRESETS: Lazy<Vec<ModelPreset>> = Lazy::new(|| {
-    let mut response = bundled_models_response()
+    let mut response = test_models_response()
         .unwrap_or_else(|err| panic!("bundled models.json should parse: {err}"));
     response.models.sort_by_key(|model| model.priority);
     let mut presets: Vec<ModelPreset> = response.models.into_iter().map(Into::into).collect();
@@ -149,8 +148,11 @@ pub fn models_manager_with_provider(
     auth_manager: Arc<AuthManager>,
     provider: ModelProviderInfo,
 ) -> SharedModelsManager {
-    let provider = create_model_provider(provider, Some(auth_manager));
-    provider.models_manager(codex_home, /*config_model_catalog*/ None)
+    codex_model_provider::test_support::models_manager_with_provider(
+        codex_home,
+        auth_manager,
+        provider,
+    )
 }
 
 pub fn default_http_client_factory() -> HttpClientFactory {

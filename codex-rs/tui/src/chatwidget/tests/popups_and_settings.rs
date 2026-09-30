@@ -3236,6 +3236,21 @@ async fn model_selection_popup_snapshot() {
     assert_chatwidget_snapshot!("model_selection_popup", popup);
 }
 
+#[tokio::test]
+async fn model_selection_popup_bundled_models_snapshot() {
+    let mut catalog = codex_models_manager::bundled_models_response().unwrap();
+    catalog.models.sort_by_key(|model| model.priority);
+    let mut presets: Vec<ModelPreset> = catalog.models.into_iter().map(Into::into).collect();
+    ModelPreset::mark_default_by_picker_visibility(&mut presets);
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-6.1-sol")).await;
+    chat.model_catalog = Arc::new(ModelCatalog::new(presets));
+    chat.thread_id = Some(ThreadId::new());
+    chat.open_model_popup();
+
+    let popup = render_bottom_popup(&chat, /*width*/ 80);
+    assert_chatwidget_snapshot!("model_selection_popup_bundled_models", popup);
+}
+
 fn apply_model_list_response(chat: &mut ChatWidget, presets: Vec<ModelPreset>) {
     let request_id = chat.model_popup_request_id.expect("pending model request");
     assert!(chat.on_models_loaded(request_id, Ok(presets)));

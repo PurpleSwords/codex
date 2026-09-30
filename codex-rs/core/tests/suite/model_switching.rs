@@ -8,8 +8,8 @@ use codex_features::Feature;
 use codex_history::RolloutItem;
 use codex_history::RolloutLine;
 use codex_login::CodexAuth;
-use codex_models_manager::bundled_models_response;
 use codex_models_manager::manager::RefreshStrategy;
+use codex_models_manager::test_support::test_models_response;
 use codex_protocol::config_types::ApprovalsReviewer;
 use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
@@ -189,7 +189,7 @@ async fn first_turn_model_change_appends_model_instructions_developer_message(
     let request = resp_mock.single_request();
     assert_eq!(request.body_json()["model"], next_model);
     let developer_texts = request.message_input_texts("developer");
-    let expected_instructions = bundled_models_response()?
+    let expected_instructions = test_models_response()?
         .models
         .into_iter()
         .find(|model| model.slug == next_model)

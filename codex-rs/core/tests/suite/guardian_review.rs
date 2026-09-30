@@ -358,7 +358,7 @@ async fn guardian_session_prewarms_and_is_reused_for_first_review(
     skip_if_no_network!(Ok(()));
 
     let uses_codex_backend = auth.uses_codex_backend();
-    let bundled_models = codex_models_manager::bundled_models_response()?.models;
+    let bundled_models = codex_models_manager::test_support::test_models_response()?.models;
     let catalog_auto_review = bundled_models
         .iter()
         .find(|model| model.slug == expected_model)

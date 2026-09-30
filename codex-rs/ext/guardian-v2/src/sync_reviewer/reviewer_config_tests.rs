@@ -8,8 +8,8 @@ use codex_core::windows_sandbox::WindowsSandboxLevelExt;
 use codex_features::Feature;
 use codex_login::AuthManager;
 use codex_login::CodexAuth;
-use codex_models_manager::bundled_models_response;
 use codex_models_manager::manager::StaticModelsManager;
+use codex_models_manager::test_support::test_models_response;
 use codex_protocol::config_types::WindowsSandboxLevel;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::models::PermissionProfileSnapshot;
@@ -227,7 +227,7 @@ async fn honors_parent_models_auto_review_override() -> Result<()> {
 #[tokio::test]
 async fn falls_back_to_parent_model_and_effective_reasoning() -> Result<()> {
     let server = responses::start_mock_server().await;
-    let mut parent_model = bundled_models_response()?
+    let mut parent_model = test_models_response()?
         .models
         .into_iter()
         .find(|model| model.slug == "gpt-5.5")

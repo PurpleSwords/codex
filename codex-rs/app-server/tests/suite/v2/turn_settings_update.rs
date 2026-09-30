@@ -22,7 +22,7 @@ use codex_app_server_protocol::TurnStartResponse;
 use codex_app_server_protocol::TurnStatus;
 use codex_app_server_protocol::UserInput;
 use codex_features::Feature;
-use codex_models_manager::bundled_models_response;
+use codex_models_manager::test_support::test_models_response;
 use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::openai_models::ModelsResponse;
 use codex_protocol::openai_models::ReasoningEffort;
@@ -554,7 +554,7 @@ async fn start_turn(app: &mut TestAppServer, thread_id: &str) -> Result<String> 
 }
 
 fn mock_config(codex_home: &Path, server_uri: &str) -> Result<MockResponsesConfig> {
-    let model = bundled_models_response()?
+    let model = test_models_response()?
         .models
         .into_iter()
         .find(|model| model.slug == "gpt-5.4")

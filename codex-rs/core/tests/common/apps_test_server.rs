@@ -4,7 +4,7 @@ use anyhow::Result;
 use codex_core::config::Config;
 use codex_features::Feature;
 use codex_login::CodexAuth;
-use codex_models_manager::bundled_models_response;
+use codex_models_manager::test_support::test_models_response;
 use serde_json::Value;
 use serde_json::json;
 use std::sync::Arc;
@@ -253,7 +253,7 @@ impl AppsTestServer {
 }
 
 pub fn configure_search_capable_model(config: &mut Config) {
-    let mut model_catalog = bundled_models_response().expect("bundled models.json should parse");
+    let mut model_catalog = test_models_response().expect("bundled models.json should parse");
     let model = model_catalog
         .models
         .iter_mut()

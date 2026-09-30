@@ -7,7 +7,7 @@ use codex_core::config::AgentRoleConfig;
 use codex_core::config::CurrentTimeReminderConfig;
 use codex_features::Feature;
 use codex_history::RolloutItem;
-use codex_models_manager::bundled_models_response;
+use codex_models_manager::test_support::test_models_response;
 use codex_protocol::ThreadId;
 use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::items::SubAgentActivityItem;
@@ -1531,7 +1531,7 @@ async fn spawned_full_history_v2_child_uses_model_precedence_without_dropping_co
             .enable(Feature::MultiAgentV2)
             .expect("test config should allow feature update");
         let model_catalog = config.model_catalog.get_or_insert_with(|| {
-            bundled_models_response().expect("bundled models.json should parse")
+            test_models_response().expect("bundled models.json should parse")
         });
         for model in [INHERITED_MODEL, V2_DEFAULT_MODEL, V2_REQUESTED_MODEL] {
             let model_info = model_catalog
@@ -1975,7 +1975,7 @@ async fn spawned_agent_uses_summary_support_for_final_model(
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut model_catalog = bundled_models_response().expect("bundled models.json should parse");
+    let mut model_catalog = test_models_response().expect("bundled models.json should parse");
     for (slug, supports_summary) in [
         (INHERITED_MODEL, parent_supports_summary),
         (REQUESTED_MODEL, child_supports_summary),

@@ -10,7 +10,7 @@ use codex_history::RolloutLine;
 use codex_login::CodexAuth;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::built_in_model_providers;
-use codex_models_manager::bundled_models_response;
+use codex_models_manager::test_support::test_models_response;
 use codex_protocol::config_types::AutoCompactTokenLimitScope;
 use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
@@ -404,7 +404,7 @@ fn local_compaction_provider(server: &wiremock::MockServer) -> ModelProviderInfo
 }
 
 fn model_info_with_context_window(slug: &str, context_window: i64) -> ModelInfo {
-    let models_response = bundled_models_response().expect("bundled models.json should parse");
+    let models_response = test_models_response().expect("bundled models.json should parse");
     let mut model_info = models_response
         .models
         .into_iter()

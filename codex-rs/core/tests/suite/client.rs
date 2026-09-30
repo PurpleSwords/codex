@@ -23,7 +23,7 @@ use codex_model_provider_info::AMAZON_BEDROCK_PROVIDER_ID;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::WireApi;
 use codex_model_provider_info::built_in_model_providers;
-use codex_models_manager::bundled_models_response;
+use codex_models_manager::test_support::test_models_response;
 use codex_otel::SessionTelemetry;
 use codex_otel::TelemetryAuthMode;
 use codex_protocol::ResponseItemId;
@@ -2458,7 +2458,7 @@ async fn model_without_summary_parameter_support_omits_configured_summary() -> a
         sse(vec![ev_response_created("resp1"), ev_completed("resp1")]),
     )
     .await;
-    let mut model_catalog = bundled_models_response().expect("bundled models.json should parse");
+    let mut model_catalog = test_models_response().expect("bundled models.json should parse");
     let model = model_catalog
         .models
         .iter_mut()
@@ -2592,7 +2592,7 @@ async fn user_turn_explicit_reasoning_summary_overrides_model_catalog_default() 
     )
     .await;
 
-    let mut model_catalog = bundled_models_response().expect("bundled models.json should parse");
+    let mut model_catalog = test_models_response().expect("bundled models.json should parse");
     let model = model_catalog
         .models
         .iter_mut()
@@ -2705,7 +2705,7 @@ async fn reasoning_summary_none_overrides_model_catalog_default() -> anyhow::Res
     )
     .await;
 
-    let mut model_catalog = bundled_models_response().expect("bundled models.json should parse");
+    let mut model_catalog = test_models_response().expect("bundled models.json should parse");
     let model = model_catalog
         .models
         .iter_mut()

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use codex_core::TurnInputRequest;
 use codex_features::Feature;
-use codex_models_manager::bundled_models_response;
+use codex_models_manager::test_support::test_models_response;
 use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::config_types::ServiceTier;
 use codex_protocol::openai_models::ModelsResponse;
@@ -62,7 +62,7 @@ async fn ordinary_settings_updates_keep_the_running_turn_snapshot() -> Result<()
                 .enable(Feature::DefaultModeRequestUserInput)
                 .unwrap();
             config.features.enable(Feature::FastMode).unwrap();
-            let template = bundled_models_response()
+            let template = test_models_response()
                 .unwrap()
                 .models
                 .into_iter()

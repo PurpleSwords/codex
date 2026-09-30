@@ -18,12 +18,12 @@ use codex_config::Sourced;
 use codex_http_client::HttpClientFactory;
 use codex_login::AuthManager;
 use codex_models_manager::ModelsManagerConfig;
-use codex_models_manager::bundled_models_response;
 use codex_models_manager::manager::ModelsManager;
 use codex_models_manager::manager::ModelsManagerFuture;
 use codex_models_manager::manager::RefreshStrategy;
 use codex_models_manager::manager::StaticModelsManager;
 use codex_models_manager::model_info::with_config_overrides;
+use codex_models_manager::test_support::test_models_response;
 use codex_protocol::config_types::ApprovalsReviewer;
 use codex_protocol::config_types::CollaborationModeMask;
 use codex_protocol::config_types::ReasoningSummary;
@@ -53,7 +53,7 @@ const MODEL_A: &str = "step-activation-a";
 const MODEL_B: &str = "step-activation-b";
 
 fn activation_models() -> Vec<ModelInfo> {
-    let model = bundled_models_response()
+    let model = test_models_response()
         .expect("bundled models")
         .models
         .into_iter()

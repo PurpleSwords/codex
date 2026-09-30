@@ -36,8 +36,8 @@ use codex_home::CodexHomeUserInstructionsProvider;
 use codex_login::CodexAuth;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::built_in_model_providers;
-use codex_models_manager::bundled_models_response;
 use codex_models_manager::manager::SharedModelsManager;
+use codex_models_manager::test_support::test_models_response;
 use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::config_types::Settings;
@@ -378,7 +378,7 @@ impl TestCodexBuilder {
         let model = model.to_string();
         self.with_config(move |config| {
             let model_catalog = config.model_catalog.get_or_insert_with(|| {
-                bundled_models_response().expect("bundled models.json should parse")
+                test_models_response().expect("bundled models.json should parse")
             });
             let model_info = model_catalog
                 .models
@@ -688,10 +688,17 @@ impl TestCodexBuilder {
             auth.clone(),
             config.codex_home.to_path_buf(),
         );
-        let models_manager = self
-            .models_manager
-            .clone()
-            .unwrap_or_else(|| codex_core::build_models_manager(&config, auth_manager.clone()));
+        let models_manager = self.models_manager.clone().unwrap_or_else(|| {
+            if config.model_catalog.is_some() {
+                codex_core::build_models_manager(&config, auth_manager.clone())
+            } else {
+                codex_core::test_support::models_manager_with_provider(
+                    config.codex_home.to_path_buf(),
+                    auth_manager.clone(),
+                    config.model_provider.clone(),
+                )
+            }
+        });
         let thread_manager = ThreadManager::new(
             &config,
             auth_manager.clone(),
@@ -874,7 +881,7 @@ fn ensure_test_model_catalog(config: &mut Config) -> Result<()> {
         return Ok(());
     }
 
-    let bundled_models = bundled_models_response().expect("bundled models.json should parse");
+    let bundled_models = test_models_response().expect("bundled models.json should parse");
     let mut model = bundled_models
         .models
         .iter()

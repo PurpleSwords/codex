@@ -4,7 +4,6 @@ use codex_model_provider_info::AMAZON_BEDROCK_GPT_5_6_LUNA_MODEL_ID;
 use codex_model_provider_info::AMAZON_BEDROCK_GPT_5_6_SOL_MODEL_ID;
 use codex_model_provider_info::AMAZON_BEDROCK_GPT_5_6_TERRA_MODEL_ID;
 use codex_model_provider_info::AMAZON_BEDROCK_GPT_6_ASTRA_MODEL_ID;
-use codex_models_manager::bundled_models_response;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ModelVisibility;
 use codex_protocol::openai_models::ModelsResponse;
@@ -24,25 +23,25 @@ pub(crate) fn static_model_catalog() -> ModelsResponse {
     normalize_bedrock_catalog(ModelsResponse {
         models: vec![
             bedrock_model(
-                bundled_openai_model(GPT_5_6_SOL_OPENAI_MODEL_ID),
+                bedrock_source_model(GPT_5_6_SOL_OPENAI_MODEL_ID),
                 AMAZON_BEDROCK_GPT_5_6_SOL_MODEL_ID,
                 "GPT-5.6 Sol",
                 /*priority*/ 0,
             ),
             bedrock_model(
-                bundled_openai_model(GPT_6_ASTRA_OPENAI_MODEL_ID),
+                bedrock_source_model(GPT_6_ASTRA_OPENAI_MODEL_ID),
                 AMAZON_BEDROCK_GPT_6_ASTRA_MODEL_ID,
                 "GPT-6-Astra",
                 /*priority*/ 1,
             ),
             bedrock_model(
-                bundled_openai_model(GPT_5_6_TERRA_OPENAI_MODEL_ID),
+                bedrock_source_model(GPT_5_6_TERRA_OPENAI_MODEL_ID),
                 AMAZON_BEDROCK_GPT_5_6_TERRA_MODEL_ID,
                 "GPT-5.6 Terra",
                 /*priority*/ 2,
             ),
             bedrock_model(
-                bundled_openai_model(GPT_5_6_LUNA_OPENAI_MODEL_ID),
+                bedrock_source_model(GPT_5_6_LUNA_OPENAI_MODEL_ID),
                 AMAZON_BEDROCK_GPT_5_6_LUNA_MODEL_ID,
                 "GPT-5.6 Luna",
                 /*priority*/ 3,
@@ -83,7 +82,7 @@ fn gpt_5_bedrock_model(
     display_name: &str,
     priority: i32,
 ) -> ModelInfo {
-    let mut model = bundled_openai_model(openai_slug);
+    let mut model = bedrock_source_model(openai_slug);
     model.slug = bedrock_slug.to_string();
     model.display_name = display_name.to_string();
     model.priority = priority;
@@ -115,13 +114,14 @@ fn bedrock_model(
     model
 }
 
-fn bundled_openai_model(slug: &str) -> ModelInfo {
-    bundled_models_response()
-        .unwrap_or_else(|err| panic!("bundled models.json should parse: {err}"))
+fn bedrock_source_model(slug: &str) -> ModelInfo {
+    // Bedrock availability and metadata are independent of the OpenAI catalog.
+    serde_json::from_str::<ModelsResponse>(include_str!("models.json"))
+        .unwrap_or_else(|err| panic!("Bedrock models.json should parse: {err}"))
         .models
         .into_iter()
         .find(|model| model.slug == slug)
-        .unwrap_or_else(|| panic!("bundled models.json should include {slug}"))
+        .unwrap_or_else(|| panic!("Bedrock models.json should include {slug}"))
 }
 
 #[cfg(test)]
@@ -210,7 +210,7 @@ mod tests {
 
     #[test]
     fn configured_bedrock_catalogs_normalize_unsupported_model_capabilities() {
-        let model = bundled_openai_model(GPT_5_4_OPENAI_MODEL_ID);
+        let model = bedrock_source_model(GPT_5_4_OPENAI_MODEL_ID);
         let mut expected = model.clone();
         expected.additional_speed_tiers.clear();
         expected.service_tiers.clear();
@@ -252,25 +252,25 @@ mod tests {
 
         for (mut expected, slug, display_name, priority) in [
             (
-                bundled_openai_model(GPT_5_6_SOL_OPENAI_MODEL_ID),
+                bedrock_source_model(GPT_5_6_SOL_OPENAI_MODEL_ID),
                 AMAZON_BEDROCK_GPT_5_6_SOL_MODEL_ID,
                 "GPT-5.6 Sol",
                 0,
             ),
             (
-                bundled_openai_model(GPT_5_6_TERRA_OPENAI_MODEL_ID),
+                bedrock_source_model(GPT_5_6_TERRA_OPENAI_MODEL_ID),
                 AMAZON_BEDROCK_GPT_5_6_TERRA_MODEL_ID,
                 "GPT-5.6 Terra",
                 2,
             ),
             (
-                bundled_openai_model(GPT_5_6_LUNA_OPENAI_MODEL_ID),
+                bedrock_source_model(GPT_5_6_LUNA_OPENAI_MODEL_ID),
                 AMAZON_BEDROCK_GPT_5_6_LUNA_MODEL_ID,
                 "GPT-5.6 Luna",
                 3,
             ),
             (
-                bundled_openai_model(GPT_6_ASTRA_OPENAI_MODEL_ID),
+                bedrock_source_model(GPT_6_ASTRA_OPENAI_MODEL_ID),
                 AMAZON_BEDROCK_GPT_6_ASTRA_MODEL_ID,
                 "GPT-6-Astra",
                 1,

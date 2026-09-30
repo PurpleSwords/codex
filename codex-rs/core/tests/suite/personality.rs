@@ -1,10 +1,10 @@
 use codex_config::types::Personality;
 use codex_core::TurnInputRequest;
 use codex_features::Feature;
-use codex_models_manager::bundled_models_response;
 use codex_models_manager::manager::RefreshStrategy;
 use codex_models_manager::manager::SharedModelsManager;
 use codex_models_manager::model_info::BASE_INSTRUCTIONS;
+use codex_models_manager::test_support::test_models_response;
 use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::config_types::ReasoningSummary;
@@ -487,7 +487,7 @@ async fn disabled_personality_sends_remote_default_instructions() -> anyhow::Res
     let remote_slug = "remote-disabled-personality";
     let default_personality = "default remote personality";
     let friendly_personality = "friendly remote personality";
-    let mut remote_model = bundled_models_response()?
+    let mut remote_model = test_models_response()?
         .models
         .into_iter()
         .find(|model| model.slug == "gpt-5.4")

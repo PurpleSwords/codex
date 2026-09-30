@@ -13,6 +13,10 @@ fn all_model_presets() -> Vec<ModelPreset> {
 #[tokio::test]
 async fn model_picker_refresh_updates_app_catalog_from_app_server() -> Result<()> {
     let (mut app, mut rx, _op_rx) = make_test_app_with_channels().await;
+    app_test_support::write_models_cache_with_models(
+        app.config.codex_home.as_path(),
+        codex_models_manager::test_support::test_models_response()?.models,
+    )?;
     let mut app_server = start_config_write_test_app_server(&app).await?;
     let mut tui = crate::tui::test_support::make_test_tui()?;
     let fast = Some(ServiceTier::Fast.request_value());
