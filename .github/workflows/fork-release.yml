@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "Validate builds, check pinned artifacts, or publish the reviewed candidate"
+        description: "Validate builds, check pinned artifacts, or publish npm and GitHub Release"
         type: choice
         default: validate
         options: [validate, promote-check, publish]
@@ -95,13 +95,13 @@ jobs:
   promote:
     if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'promote-check' || (inputs.mode == 'publish' && github.ref == 'refs/heads/main')) }}
     runs-on: ubuntu-24.04
-    # Allow for registry processing of each of the seven checksum-pinned packages.
-    timeout-minutes: 90
+    # Include registry processing and downloads/uploads of all six native archives.
+    timeout-minutes: 240
     concurrency:
       group: fork-npm-publish
       cancel-in-progress: false
     permissions:
-      contents: read
+      contents: write
       actions: read
       id-token: write
     steps:
@@ -115,7 +115,7 @@ jobs:
         with:
           node-version: "24"
           package-manager-cache: false
-      - name: Verify and promote reviewed tarballs (no rebuild)
+      - name: Publish reviewed npm packages and GitHub Release (no rebuild)
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ inputs.version }}

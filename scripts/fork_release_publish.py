@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Promote checksum-pinned, previously validated npm tarballs; never rebuild them."""
+"""Promote validated npm tarballs and GitHub archives without rebuilding them."""
 
 import argparse
 import hashlib
@@ -15,16 +15,10 @@ import zipfile
 
 from fork_release_smoke import load_packages
 from fork_release_validation import BUILDER, ROOT, release_config
+from fork_github_release import REPOSITORY, github, prepare_assets, publish_release
 
 
-REPOSITORY = "PurpleSwords/codex"
 REGISTRY = "https://registry.npmjs.org"
-
-
-def github(path):
-    return json.loads(
-        subprocess.check_output(["gh", "api", f"repos/{REPOSITORY}/{path}"], text=True)
-    )
 
 
 def validate_run(run, candidate, workflow):
@@ -211,12 +205,17 @@ def main():
             )
         directory = root / "packages"
         unpack_verified(archive, directory, candidate["artifactSha256"])
+        assets = root / "github-assets"
+        prepare_assets(candidate, assets)
+        publish_release(candidate, assets, execute=False)
         publish_packages(
             directory,
             candidate["version"],
             candidate["previousLatest"],
             execute=args.publish,
         )
+        if args.publish:
+            publish_release(candidate, assets, execute=True)
 
 
 if __name__ == "__main__":

@@ -42,3 +42,21 @@ Print a read-only plan (it does not check npm availability or publish anything):
 ```sh
 python3 scripts/fork_release.py --version 0.153.4-fork.1 --current-version 0.153.4
 ```
+
+## Publishing validated builds
+
+Run the `fork-release` workflow on `main` with mode `validate` to build and verify
+all six platforms. Record the successful source CI, validation run and npm artifact
+identity in `fork-release-candidate.json` before promotion.
+
+Mode `promote-check` checks the reviewed npm packages and native GitHub archives
+without publishing. Mode `publish` first publishes npm, then automatically creates
+`fork-v<version>` as the latest GitHub Release, attaching the same six native
+archives and `SHA256SUMS`. Promotion reuses the successful build artifacts and
+does not compile again. A failed npm publication prevents GitHub publication.
+
+GitHub assets upload to a draft, which becomes public only after all checksums
+match. Retry mode `publish` to resume an interrupted promotion; byte-identical
+npm packages and GitHub assets are kept, while conflicting versions, tags or
+assets cause promotion to fail. Validation artifacts expire after seven days,
+so promote the reviewed candidate while its artifacts are still available.
