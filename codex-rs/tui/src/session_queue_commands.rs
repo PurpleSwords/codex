@@ -41,10 +41,9 @@ pub async fn run_session_queue_command(
             .is_some()
     {
         return Err(eyre!(
-            "cannot queue through an embedded app server while a local app-server daemon is running; remove configuration overrides or use --remote"
+            "cannot queue through an embedded app server while a local app-server daemon is running; use --remote to select that server explicitly"
         ));
     }
-    let implicit_local_daemon = !explicit_remote && !app_server.uses_embedded_app_server();
     let client_message_id = Uuid::now_v7().to_string();
 
     let (thread_id, response) = match run_session_queue_action_with_app_server(
@@ -56,17 +55,10 @@ pub async fn run_session_queue_command(
     )
     .await
     {
-        Err(error)
-            if (implicit_local_daemon || explicit_remote) && is_unsupported_queue_error(&error) =>
-        {
-            let server = if explicit_remote {
-                "remote app server"
-            } else {
-                "local app-server daemon"
-            };
-            return Err(error.wrap_err(format!(
-                "the {server} does not support thread/queue/add; update or restart the {server}"
-            )));
+        Err(error) if explicit_remote && is_unsupported_queue_error(&error) => {
+            return Err(error.wrap_err(
+                "the remote app server does not support thread/queue/add; update or restart the remote app server",
+            ));
         }
         result => result?,
     };

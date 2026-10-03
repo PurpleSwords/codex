@@ -176,6 +176,14 @@ jobs:
       - name: Test installation context
         if: ${{ !cancelled() && steps.build.outcome == 'success' && inputs.profile != 'unit-regressions' && inputs.profile != 'core-regressions' && inputs.profile != 'integration-races' }}
         run: just test --locked -p codex-install-context
+      - name: Test explicit backend selection and HTTP/2 negotiation
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && (inputs.profile == 'baseline' || inputs.profile == '') }}
+        run: |
+          just test --locked -p codex-cli --test agents_requires_remote --test app_server --test queue --retries=0
+          # Cargo may populate SSL_CERT_FILE after the workflow shell starts.
+          # CA-specific subprocess tests set their own certificates explicitly.
+          just test --locked -p codex-http-client --retries=0 \
+            --config 'target.x86_64-unknown-linux-gnu.runner=["env","-u","CODEX_CA_CERTIFICATE","-u","SSL_CERT_FILE"]'
       - name: Rust benchmark smoke test
         if: ${{ !cancelled() && steps.build.outcome == 'success' && inputs.benchmarks }}
         run: just bench-smoke
