@@ -93,16 +93,7 @@ jobs:
           cmp "$CARGO_TARGET_DIR/debug/bwrap" "$CARGO_TARGET_DIR/debug/codex-resources/bwrap"
       - name: Test HTTP client and HTTP/2 negotiation
         if: inputs.profile == 'http-client'
-        run: |
-          python3 - <<'PY'
-          import os
-          for name in ("CODEX_CA_CERTIFICATE", "SSL_CERT_FILE"):
-              print(f"{name} configured: {bool(os.environ.get(name))}")
-          PY
-          # A custom CA switches the default client to Rustls. These tests also
-          # exercise native TLS; CA-specific tests supply their own bundles.
-          env -u CODEX_CA_CERTIFICATE -u SSL_CERT_FILE \
-            just test --locked -p codex-http-client --retries=0
+        run: just test --locked -p codex-http-client --retries=0
       - name: Smoke test CLI with an isolated home
         if: steps.build.outcome == 'success'
         run: |
