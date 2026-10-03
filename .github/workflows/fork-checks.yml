@@ -19,11 +19,29 @@ on:
           - tui-terminal-regressions
           - integration-races
           - model-catalog-extensions
+          - http-client
 
 permissions:
   contents: read
 
 jobs:
+  http-client-lock:
+    if: inputs.profile == 'http-client'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-ci
+      - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
+      - run: just bazel-lock-update
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: http-client-bazel-lock
+          path: MODULE.bazel.lock
+          retention-days: 7
+
   linux:
     name: ${{ inputs.profile == 'model-catalog-extensions' && 'Linux model catalog extensions (diagnostic only)' || inputs.profile == 'unit-regressions' && 'Linux unit regressions (diagnostic only)' || inputs.profile == 'core-regressions' && 'Linux core regressions (diagnostic only)' || inputs.profile == 'tui-terminal-regressions' && 'Linux TUI terminal regressions (diagnostic only)' || inputs.profile == 'integration-races' && 'Linux integration races (diagnostic only)' || 'Linux build and baseline tests' }}
     runs-on: ubuntu-24.04
@@ -50,6 +68,7 @@ jobs:
         with:
           tool: cargo-nextest@0.9.143
       - uses: ./.github/actions/setup-rusty-v8
+        if: inputs.profile != 'http-client'
         with:
           target: x86_64-unknown-linux-gnu
       - name: Cache Cargo downloads and build outputs
@@ -64,7 +83,7 @@ jobs:
             official-01534-linux-v1-${{ hashFiles('codex-rs/Cargo.lock', 'codex-rs/rust-toolchain.toml') }}-
       - name: Build workspace binaries including runtime test helpers
         id: build
-        if: inputs.profile != 'unit-regressions' && inputs.profile != 'tui-terminal-regressions' && inputs.profile != 'model-catalog-extensions'
+        if: inputs.profile != 'unit-regressions' && inputs.profile != 'tui-terminal-regressions' && inputs.profile != 'model-catalog-extensions' && inputs.profile != 'http-client'
         run: |
           cargo build --locked --workspace --bins
           # Test executables live in debug/deps and cannot discover debug/bwrap.
@@ -72,6 +91,9 @@ jobs:
           install -D -m 755 "$CARGO_TARGET_DIR/debug/bwrap" \
             "$CARGO_TARGET_DIR/debug/codex-resources/bwrap"
           cmp "$CARGO_TARGET_DIR/debug/bwrap" "$CARGO_TARGET_DIR/debug/codex-resources/bwrap"
+      - name: Test HTTP client and HTTP/2 negotiation
+        if: inputs.profile == 'http-client'
+        run: just test --locked -p codex-http-client --retries=0
       - name: Smoke test CLI with an isolated home
         if: steps.build.outcome == 'success'
         run: |
