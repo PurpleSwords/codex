@@ -1,9 +1,9 @@
 {
-  "version": "0.153.4-fork.2",
-  "previousLatest": "0.153.4-fork.1",
-  "sourceSha": "d2e89c503cfcb36a58279cb845b0f2b00a7462c9",
-  "validationRun": 36767543091,
-  "blockingRun": 36767496137,
-  "artifactId": 11126932813,
-  "artifactSha256": "66332253aa3c616df4c8775c579b61bf6db6de0514dc8bcedbcf9626aee003c9"
+  "version": "0.153.4-fork.3",
+  "previousLatest": "0.153.4-fork.2",
+  "sourceSha": "224ca87455a1635d515a5f8ca959d1ebb8cf8df9",
+  "validationRun": 37125234934,
+  "blockingRun": 37125218209,
+  "artifactId": 11277306672,
+  "artifactSha256": "4482ec5de8d53851850a6ce7f2cd55288e16c989e6c2a7cefe45c463254f98f0"
 }
