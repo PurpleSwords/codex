@@ -21,6 +21,11 @@ use crate::OutboundProxyPolicy;
 
 #[tokio::test]
 async fn request_failures_classify_real_untrusted_certificate_handshakes() {
+    let subscriber = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .with_test_writer()
+        .finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
     codex_utils_rustls_provider::ensure_rustls_crypto_provider();
     let certificate = rcgen::generate_simple_self_signed(vec!["localhost".to_string()])
         .expect("self-signed certificate should generate");
