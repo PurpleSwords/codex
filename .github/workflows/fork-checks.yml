@@ -93,7 +93,12 @@ jobs:
           cmp "$CARGO_TARGET_DIR/debug/bwrap" "$CARGO_TARGET_DIR/debug/codex-resources/bwrap"
       - name: Test HTTP client and HTTP/2 negotiation
         if: inputs.profile == 'http-client'
-        run: just test --locked -p codex-http-client --retries=0
+        run: |
+          # Cargo can populate SSL_CERT_FILE after the workflow shell starts.
+          # Clear CA overrides at test-binary startup so native TLS tests keep
+          # their intended backend; CA-specific subprocesses set their own.
+          just test --locked -p codex-http-client --retries=0 \
+            --config 'target.x86_64-unknown-linux-gnu.runner=["env","-u","CODEX_CA_CERTIFICATE","-u","SSL_CERT_FILE"]'
       - name: Smoke test CLI with an isolated home
         if: steps.build.outcome == 'success'
         run: |

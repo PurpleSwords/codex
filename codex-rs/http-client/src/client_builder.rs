@@ -274,7 +274,6 @@ impl HttpClientBuilder {
     }
 
     fn base_reqwest_builder(self) -> reqwest::ClientBuilder {
-        tracing::debug!(tls_backend = ?self.tls_backend, "building HTTP client TLS configuration");
         let mut builder = reqwest::Client::builder();
         if self.tls_backend == TlsBackend::Rustls {
             ensure_rustls_crypto_provider();
