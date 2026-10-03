@@ -12,6 +12,21 @@ dependency aliases. Each payload retains the native Codex package layout,
 including the code-mode companion executable. LICENSE and NOTICE accompany the
 packages. This fork does not imply OpenAI endorsement.
 
+## Backend selection
+
+Ordinary launches, including `resume`, `fork`, and session management commands,
+use the backend embedded in the fork executable. An existing official background
+server in the same Codex home does not replace that backend.
+
+Connect to a shared server explicitly with `--remote`. For the default local
+daemon socket, use `codex --remote unix://` or `codex agents --remote unix://`.
+The selected server then supplies model requests and tools, so choose a server
+built from the fork when those backend changes are needed. `codex agents` requires
+`--remote`; daemon lifecycle commands remain available for intentional management.
+
+HTTPS requests negotiate HTTP/2 when the server supports it and retain HTTP/1.1
+compatibility otherwise.
+
 Version `0.153.4` has already been published from the previous fork history.
 Rebuilding the current baseline does not replace that npm version. Candidate
 packaging is not authorization to publish or evidence of release readiness.

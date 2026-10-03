@@ -104,7 +104,9 @@ mod app_event;
 mod app_event_sender;
 mod app_info;
 mod app_server_approval_conversions;
+mod app_server_launch;
 mod app_server_session;
+use app_server_launch::app_server_target_for_launch;
 mod approval_events;
 mod ascii_animation;
 mod backend_banners;
@@ -857,34 +859,6 @@ fn latest_session_cwd_filter<'a>(
     }
 }
 
-fn app_server_target_for_launch(
-    explicit_remote_endpoint: Option<RemoteAppServerEndpoint>,
-    default_daemon_socket: Option<AbsolutePathBuf>,
-    can_reuse_implicit_local_daemon: bool,
-    workload_identity_selected: bool,
-) -> std::io::Result<AppServerTarget> {
-    if workload_identity_selected {
-        if explicit_remote_endpoint.is_some() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "workload identity must be configured on the remote app-server host",
-            ));
-        }
-        return Ok(AppServerTarget::Embedded);
-    }
-    Ok(match explicit_remote_endpoint {
-        Some(endpoint) => AppServerTarget::Remote { endpoint },
-        None if can_reuse_implicit_local_daemon => {
-            default_daemon_socket.map_or(AppServerTarget::Embedded, |socket_path| {
-                AppServerTarget::LocalDaemon {
-                    endpoint: RemoteAppServerEndpoint::UnixSocket { socket_path },
-                }
-            })
-        }
-        None => AppServerTarget::Embedded,
-    })
-}
-
 async fn cloud_config_bundle_for_app_server_target(
     app_server_target: &AppServerTarget,
     bootstrap_config: &ConfigTomlLoadResult,
@@ -914,19 +888,6 @@ fn loader_overrides_are_default(loader_overrides: &LoaderOverrides) -> bool {
     let loader_overrides_are_default =
         loader_overrides_are_default && loader_overrides.managed_preferences_base64.is_none();
     loader_overrides_are_default
-}
-
-fn can_reuse_implicit_local_daemon(
-    cli_kv_overrides: &[(String, toml::Value)],
-    loader_overrides: &LoaderOverrides,
-    strict_config: bool,
-    has_non_replayable_launch_overrides: bool,
-) -> bool {
-    // A reused daemon cannot adopt this invocation's full launch config state.
-    cli_kv_overrides.is_empty()
-        && loader_overrides_are_default(loader_overrides)
-        && !strict_config
-        && !has_non_replayable_launch_overrides
 }
 
 /// Restore terminal modes before a fatal startup exit bypasses destructor cleanup.
@@ -2570,135 +2531,6 @@ mod tests {
             maybe_probe_default_daemon_socket(codex_home.path()).await,
             Some(socket_path)
         );
-        Ok(())
-    }
-
-    #[test]
-    fn app_server_target_for_launch_uses_local_daemon_for_default_socket() -> color_eyre::Result<()>
-    {
-        let socket_path = AbsolutePathBuf::relative_to_current_dir("codex.sock")?;
-        let target = app_server_target_for_launch(
-            /*explicit_remote_endpoint*/ None,
-            Some(socket_path.clone()),
-            /*can_reuse_implicit_local_daemon*/ true,
-            /*workload_identity_selected*/ false,
-        )?;
-
-        assert_eq!(
-            target,
-            AppServerTarget::LocalDaemon {
-                endpoint: RemoteAppServerEndpoint::UnixSocket { socket_path },
-            }
-        );
-        assert!(!target.uses_remote_workspace());
-        assert_eq!(target.thread_params_mode(), ThreadParamsMode::Embedded);
-        Ok(())
-    }
-
-    #[test]
-    fn app_server_target_for_launch_prefers_explicit_remote_endpoint() -> color_eyre::Result<()> {
-        let explicit_endpoint = RemoteAppServerEndpoint::UnixSocket {
-            socket_path: AbsolutePathBuf::relative_to_current_dir("explicit.sock")?,
-        };
-        let target = app_server_target_for_launch(
-            Some(explicit_endpoint.clone()),
-            Some(AbsolutePathBuf::relative_to_current_dir("default.sock")?),
-            /*can_reuse_implicit_local_daemon*/ false,
-            /*workload_identity_selected*/ false,
-        )?;
-
-        assert_eq!(
-            target,
-            AppServerTarget::Remote {
-                endpoint: explicit_endpoint,
-            }
-        );
-        assert!(target.uses_remote_workspace());
-        assert_eq!(target.thread_params_mode(), ThreadParamsMode::Remote);
-        Ok(())
-    }
-
-    #[test]
-    fn app_server_target_for_launch_skips_local_daemon_when_launch_config_is_not_replayable()
-    -> color_eyre::Result<()> {
-        let socket_path = AbsolutePathBuf::relative_to_current_dir("codex.sock")?;
-        let target = app_server_target_for_launch(
-            /*explicit_remote_endpoint*/ None,
-            Some(socket_path),
-            /*can_reuse_implicit_local_daemon*/ false,
-            /*workload_identity_selected*/ false,
-        )?;
-
-        assert_eq!(target, AppServerTarget::Embedded);
-        Ok(())
-    }
-
-    #[test]
-    fn workload_identity_requires_an_embedded_app_server() -> color_eyre::Result<()> {
-        let default_socket = AbsolutePathBuf::relative_to_current_dir("default.sock")?;
-        assert_eq!(
-            app_server_target_for_launch(
-                /*explicit_remote_endpoint*/ None,
-                Some(default_socket),
-                /*can_reuse_implicit_local_daemon*/ true,
-                /*workload_identity_selected*/ true,
-            )?,
-            AppServerTarget::Embedded
-        );
-
-        let explicit_endpoint = RemoteAppServerEndpoint::UnixSocket {
-            socket_path: AbsolutePathBuf::relative_to_current_dir("explicit.sock")?,
-        };
-        let error = app_server_target_for_launch(
-            Some(explicit_endpoint),
-            /*default_daemon_socket*/ None,
-            /*can_reuse_implicit_local_daemon*/ false,
-            /*workload_identity_selected*/ true,
-        )
-        .expect_err("remote hosts must own workload identity");
-        assert_eq!(
-            error.to_string(),
-            "workload identity must be configured on the remote app-server host"
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn can_reuse_implicit_local_daemon_requires_default_launch_config() -> color_eyre::Result<()> {
-        let mut loader_overrides = LoaderOverrides::default();
-        let cli_kv_overrides = vec![("web_search".to_string(), toml::Value::String("live".into()))];
-
-        assert!(can_reuse_implicit_local_daemon(
-            &[],
-            &LoaderOverrides::default(),
-            /*strict_config*/ false,
-            /*has_non_replayable_launch_overrides*/ false,
-        ));
-        assert!(!can_reuse_implicit_local_daemon(
-            &cli_kv_overrides,
-            &LoaderOverrides::default(),
-            /*strict_config*/ false,
-            /*has_non_replayable_launch_overrides*/ false,
-        ));
-        loader_overrides.ignore_user_config = true;
-        assert!(!can_reuse_implicit_local_daemon(
-            &[],
-            &loader_overrides,
-            /*strict_config*/ false,
-            /*has_non_replayable_launch_overrides*/ false,
-        ));
-        assert!(!can_reuse_implicit_local_daemon(
-            &[],
-            &LoaderOverrides::default(),
-            /*strict_config*/ true,
-            /*has_non_replayable_launch_overrides*/ false,
-        ));
-        assert!(!can_reuse_implicit_local_daemon(
-            &[],
-            &LoaderOverrides::default(),
-            /*strict_config*/ false,
-            /*has_non_replayable_launch_overrides*/ true,
-        ));
         Ok(())
     }
 

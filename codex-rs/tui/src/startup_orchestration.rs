@@ -70,8 +70,7 @@ pub(super) async fn run_main_inner(
     if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
         let validation_target = app_server_target_for_launch(
             explicit_remote_endpoint.clone(),
-            /*default_daemon_socket*/ None,
-            /*can_reuse_implicit_local_daemon*/ false,
+            &codex_home,
             workload_identity_selected,
         )?;
         let validation_environment_manager =
@@ -135,14 +134,11 @@ pub(super) async fn run_main_inner(
         .await;
     }
 
-    let reuse_implicit_local_daemon = !workload_identity_selected
-        && (cli.agents_overview
-            || can_reuse_implicit_local_daemon(
-                &cli_kv_overrides,
-                &launch_loader_overrides,
-                strict_config,
-                cli.bypass_hook_trust,
-            ));
+    let default_launch_config = !workload_identity_selected
+        && cli_kv_overrides.is_empty()
+        && loader_overrides_are_default(&launch_loader_overrides)
+        && !strict_config
+        && !cli.bypass_hook_trust;
     let search_only_config_override = !workload_identity_selected
         && cli.web_search
         && startup_preflight::has_only_search_config_override(&cli_kv_overrides)
@@ -153,7 +149,7 @@ pub(super) async fn run_main_inner(
         startup_draft::StartupDraftInitialScreen::SessionPicker
     } else if !cli.oss
         && explicit_remote_endpoint.is_none()
-        && (reuse_implicit_local_daemon || search_only_config_override)
+        && (default_launch_config || search_only_config_override)
         && launch_loader_overrides.packaged_defaults_path.is_none()
         && startup_preflight::should_delay_startup_composer_for_first_login(
             &codex_home,
@@ -175,17 +171,9 @@ pub(super) async fn run_main_inner(
     };
     let mut startup_draft = startup_draft::StartupDraft::new(initial_screen, session_action)?;
 
-    let default_daemon = if explicit_remote_endpoint.is_none() && reuse_implicit_local_daemon {
-        startup_draft
-            .run_until(maybe_probe_default_daemon_socket(&codex_home))
-            .await?
-    } else {
-        None
-    };
     let app_server_target = app_server_target_for_launch(
         explicit_remote_endpoint,
-        default_daemon,
-        reuse_implicit_local_daemon,
+        &codex_home,
         workload_identity_selected,
     )?;
     let remote_cwd_override = cli
