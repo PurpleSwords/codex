@@ -3,6 +3,9 @@ name: fork-checks
 on:
   workflow_call:
     inputs:
+      profile:
+        type: string
+        default: baseline
       benchmarks:
         type: boolean
         default: false
@@ -22,6 +25,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: fork-checks-${{ github.event.pull_request.number || github.ref }}-${{ inputs.profile || 'baseline' }}
+  cancel-in-progress: true
 
 jobs:
   linux:
@@ -114,7 +121,7 @@ jobs:
           just test --locked -p codex-core --lib \
             -E 'test(rollback_completion_tests::) | test(transcript_preserves_output_before_subscription_and_after_lag)' \
             --retries=0
-          if [[ "$CHECK_PROFILE" == unit-regressions ]]; then
+          if [[ "$CHECK_PROFILE" != core-regressions ]]; then
             exit 0
           fi
           # Reuse the integration binary built above. Each round must pass on
@@ -131,6 +138,9 @@ jobs:
           just test --locked -p codex-core --lib \
             -E 'test(agent::role::tests::) | test(multi_agent_v2_spawn_partial_fork_turns_allows_agent_type_override)' \
             --retries=0
+          if [[ '${{ inputs.profile }}' != core-regressions ]]; then
+            exit 0
+          fi
           just test --locked -p codex-core --test all \
             -E 'test(suite::subagent_provider::) | test(suite::multi_agent_resume::)' \
             --retries=0
@@ -190,6 +200,9 @@ jobs:
       - name: Test fork model catalog extensions
         if: ${{ !cancelled() && (inputs.profile == 'model-catalog-extensions' || (steps.build.outcome == 'success' && (inputs.profile == 'baseline' || inputs.profile == ''))) }}
         run: just test --locked -p codex-models-manager -p codex-model-provider --lib --retries=0
+      - name: Test model picker snapshots
+        if: ${{ !cancelled() && inputs.profile == 'model-catalog-extensions' }}
+        run: just test --locked -p codex-tui --lib -E 'test(model_selection_popup_snapshot) | test(model_picker_)' --retries=0
       - name: Check for a clean worktree
         if: always() && !cancelled()
         uses: ./.github/actions/check-clean-worktree
