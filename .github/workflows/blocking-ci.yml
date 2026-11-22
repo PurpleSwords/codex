@@ -15,10 +15,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      bazel: ${{ steps.plan.outputs.bazel }}
+      cargo_deny: ${{ steps.plan.outputs.cargo_deny }}
+      sdk: ${{ steps.plan.outputs.sdk }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: plan
+        run: python3 .github/scripts/ci_changes.py
+      - name: Test CI routing and result policy
+        run: python3 -m unittest discover -s .github/scripts -p 'test_ci_*.py'
+
   # Keep reusable workflow calls alphabetized. The `required` job below is the
   # version-controlled list that the main-branch ruleset should require.
   bazel:
     name: Bazel
+    needs: changes
+    if: needs.changes.outputs.bazel == 'true'
     uses: ./.github/workflows/fork-bazel.yml
 
   blob-size-policy:
@@ -27,6 +45,8 @@ jobs:
 
   cargo-deny:
     name: cargo-deny
+    needs: changes
+    if: needs.changes.outputs.cargo_deny == 'true'
     uses: ./.github/workflows/cargo-deny.yml
 
   codespell:
@@ -43,10 +63,10 @@ jobs:
 
   sdk:
     name: SDK
-    needs: rust-ci
+    needs: [changes, rust-ci]
     # A test/lint failure must not suppress independent SDK results. If the
     # build failed, the missing artifact is reported by the TypeScript job.
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.sdk == 'true' }}
     uses: ./.github/workflows/sdk.yml
 
   required:
@@ -55,6 +75,7 @@ jobs:
     # required check can appear successful instead of reporting the failure.
     if: ${{ always() }}
     needs:
+      - changes
       - bazel
       - blob-size-policy
       - cargo-deny
@@ -73,4 +94,8 @@ jobs:
       - name: Require successful dependencies
         env:
           NEEDS: ${{ toJSON(needs) }}
+          ALLOWED_SKIPS: >-
+            {"bazel": ${{ needs.changes.outputs.bazel == 'false' }},
+             "cargo-deny": ${{ needs.changes.outputs.cargo_deny == 'false' }},
+             "sdk": ${{ needs.changes.outputs.sdk == 'false' }}}
         run: python3 .github/scripts/check_ci_results.py

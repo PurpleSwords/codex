@@ -9,8 +9,11 @@ permissions:
 jobs:
   cargo:
     name: Cargo build and integration tests
+    needs: changed
+    if: needs.changed.outputs.cargo_profile != 'none'
     uses: ./.github/workflows/fork-checks.yml
     with:
+      profile: ${{ needs.changed.outputs.cargo_profile }}
       benchmarks: ${{ github.event_name == 'workflow_dispatch' }}
 
   # --- Detect what changed so the fast PR workflow only runs relevant jobs ----
@@ -18,6 +21,7 @@ jobs:
     name: Detect changed areas
     runs-on: ubuntu-24.04
     outputs:
+      cargo_profile: ${{ steps.detect.outputs.cargo_profile }}
       argument_comment_lint: ${{ steps.detect.outputs.argument_comment_lint }}
       argument_comment_lint_package: ${{ steps.detect.outputs.argument_comment_lint_package }}
       codex: ${{ steps.detect.outputs.codex }}
@@ -29,37 +33,7 @@ jobs:
           persist-credentials: false
       - name: Detect changed paths (no external action)
         id: detect
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            BASE_SHA='${{ github.event.pull_request.base.sha }}'
-            HEAD_SHA='${{ github.event.pull_request.head.sha }}'
-            echo "Base SHA: $BASE_SHA"
-            echo "Head SHA: $HEAD_SHA"
-            mapfile -t files < <(git diff --name-only --no-renames "$BASE_SHA" "$HEAD_SHA")
-          else
-            # On manual runs, default to the full fast-PR bundle.
-            files=("codex-rs/force" "tools/argument-comment-lint/force" ".github/force")
-          fi
-
-          codex=false
-          argument_comment_lint=false
-          argument_comment_lint_package=false
-          workflows=false
-          for f in "${files[@]}"; do
-            [[ $f == codex-rs/* ]] && codex=true
-            [[ $f == codex-rs/* || $f == tools/argument-comment-lint/* || $f == justfile ]] && argument_comment_lint=true
-            [[ $f == defs.bzl || $f == workspace_root_test_launcher.sh.tpl || $f == workspace_root_test_launcher.bat.tpl ]] && argument_comment_lint=true
-            [[ $f == tools/argument-comment-lint/* || $f == .github/workflows/rust-ci.yml || $f == .github/workflows/rust-ci-full.yml ]] && argument_comment_lint_package=true
-            [[ $f == .github/* ]] && workflows=true
-          done
-
-          echo "argument_comment_lint=$argument_comment_lint" >> "$GITHUB_OUTPUT"
-          echo "argument_comment_lint_package=$argument_comment_lint_package" >> "$GITHUB_OUTPUT"
-          echo "codex=$codex" >> "$GITHUB_OUTPUT"
-          echo "workflows=$workflows" >> "$GITHUB_OUTPUT"
+        run: python3 .github/scripts/ci_changes.py
 
       - name: Check for a clean worktree
         if: always() && !cancelled()
@@ -203,10 +177,14 @@ jobs:
           echo "general: ${{ needs.general.result }}"
           echo "shear  : ${{ needs.cargo_shear.result }}"
 
-          [[ '${{ needs.cargo.result }}' == 'success' ]] || { echo 'Cargo baseline failed'; exit 1; }
+          if [[ '${{ needs.changed.outputs.cargo_profile }}' != none ]]; then
+            [[ '${{ needs.cargo.result }}' == 'success' ]] || { echo 'Cargo checks failed'; exit 1; }
+          elif [[ '${{ needs.cargo.result }}' != skipped ]]; then
+            echo 'Unexpected Cargo result'; exit 1
+          fi
           [[ '${{ needs.changed.result }}' == 'success' ]] || { echo 'Change detection failed'; exit 1; }
 
-          # Once the unconditional Cargo baseline and detection pass, no other
+          # Once the selected Cargo checks and detection pass, no other
           # conditional Rust checks are required for unrelated changes.
           if [[ "${NEEDS_CHANGED_OUTPUTS_ARGUMENT_COMMENT_LINT}" != 'true' && "${NEEDS_CHANGED_OUTPUTS_CODEX}" != 'true' && "${NEEDS_CHANGED_OUTPUTS_WORKFLOWS}" != 'true' ]]; then
             echo 'No relevant changes -> CI not required.'
