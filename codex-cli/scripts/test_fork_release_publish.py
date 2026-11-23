@@ -19,6 +19,35 @@ from fork_release_validation import expected_versions
 
 
 class PromotionTests(unittest.TestCase):
+    def test_ci_exceptions_require_exact_failures_and_reasons(self):
+        jobs = [{"name": "audit", "conclusion": "failure"}]
+        publish.validate_ci_exceptions(jobs, {"audit": "Reviewed for this release"})
+        for exceptions in ({}, {"other": "reason"}, {"audit": ""}):
+            with self.assertRaises(ValueError):
+                publish.validate_ci_exceptions(jobs, exceptions)
+        with self.assertRaises(ValueError):
+            publish.validate_ci_exceptions(
+                jobs + [{"name": "build", "conclusion": "cancelled"}],
+                {"audit": "reason"},
+            )
+
+    def test_ci_exception_cannot_waive_release_build_failure(self):
+        candidate = {"sourceSha": "source", "ciExceptions": {"audit": "reviewed"}}
+        run = {
+            "repository": {"full_name": publish.REPOSITORY},
+            "head_repository": {"full_name": publish.REPOSITORY},
+            "head_sha": "source",
+            "head_branch": "main",
+            "status": "completed",
+            "conclusion": "failure",
+            "event": "push",
+            "path": ".github/workflows/blocking-ci.yml",
+        }
+        publish.validate_run(run, candidate, "blocking-ci")
+        run.update(event="workflow_dispatch", path=".github/workflows/fork-release.yml")
+        with self.assertRaises(ValueError):
+            publish.validate_run(run, candidate, "fork-release")
+
     def test_source_run_must_be_successful_main_in_expected_repository(self):
         candidate = {"sourceSha": "source"}
         run = {

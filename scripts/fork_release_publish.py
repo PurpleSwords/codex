@@ -29,13 +29,32 @@ def validate_run(run, candidate, workflow):
         and run["head_branch"] == "main"
         and run["path"] == f".github/workflows/{workflow}.yml"
         and run["status"] == "completed"
-        and run["conclusion"] == "success"
+        and (
+            run["conclusion"] == "success"
+            or (
+                workflow == "blocking-ci"
+                and run["conclusion"] == "failure"
+                and candidate.get("ciExceptions")
+            )
+        )
         and run["event"]
         == ("workflow_dispatch" if workflow == "fork-release" else "push")
     ):
         raise ValueError(
             "Candidate must come from successful main validation and CI runs"
         )
+
+
+def validate_ci_exceptions(jobs, exceptions):
+    """Accept only explicitly reviewed failures in the pinned candidate run."""
+    failed = {job["name"] for job in jobs if job["conclusion"] == "failure"}
+    if (
+        not isinstance(exceptions, dict)
+        or failed != set(exceptions)
+        or any(not isinstance(reason, str) or not reason.strip() for reason in exceptions.values())
+        or any(job["conclusion"] not in ("success", "failure", "skipped") for job in jobs)
+    ):
+        raise ValueError("CI failures differ from the reviewed candidate exceptions")
 
 
 def validate_artifact(artifact, candidate):
@@ -172,6 +191,11 @@ def main():
         ("blockingRun", "blocking-ci"),
     ]:
         validate_run(github(f"actions/runs/{candidate[key]}"), candidate, workflow)
+    if candidate.get("ciExceptions"):
+        ci_jobs = github(f"actions/runs/{candidate['blockingRun']}/jobs?per_page=100")
+        if ci_jobs["total_count"] != len(ci_jobs["jobs"]):
+            raise ValueError("Incomplete CI jobs response")
+        validate_ci_exceptions(ci_jobs["jobs"], candidate["ciExceptions"])
     jobs = github(f"actions/runs/{candidate['validationRun']}/jobs?per_page=100")[
         "jobs"
     ]

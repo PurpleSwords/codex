@@ -1,9 +1,17 @@
 {
-  "version": "0.153.4-fork.3",
-  "previousLatest": "0.153.4-fork.2",
-  "sourceSha": "224ca87455a1635d515a5f8ca959d1ebb8cf8df9",
-  "validationRun": 37125234934,
-  "blockingRun": 37125218209,
-  "artifactId": 11277306672,
-  "artifactSha256": "4482ec5de8d53851850a6ce7f2cd55288e16c989e6c2a7cefe45c463254f98f0"
+  "version": "0.153.4-fork.4",
+  "previousLatest": "0.153.4-fork.3",
+  "sourceSha": "5baa3bd4234c88eeeff22a4e0e4be0391d7cb6f0",
+  "validationRun": 45039040729,
+  "blockingRun": 45039019569,
+  "artifactId": 14764730440,
+  "artifactSha256": "17f64c72e5153807c7c2d07a82d2babe6893d1a8880e997275a457a3618f0aa0",
+  "ciExceptions": {
+    "Blob size policy / Blob size policy": "User authorized release-specific deferral: optional Fence audit failed before checkout; not a binary build failure.",
+    "rust-ci / Argument comment lint package": "User authorized deferral of legacy Dylint tooling failure caused by Clippy renaming master to main.",
+    "rust-ci / Cargo build and integration tests / Linux build and baseline tests": "Reviewed pinned run: 4092 TUI tests passed; only bundled model-menu snapshot differed after adding models. Snapshot correction is in the release repair branch. Six release builds and install checks passed separately.",
+    "cargo-deny / cargo-deny": "User authorized shipping the existing dependency graph for this model-catalog release. Dependency manifests and lockfile are unchanged from fork.3 source; existing audit findings remain tracked in FORK4_RELEASE_BLOCKERS.md and are not claimed fixed.",
+    "rust-ci / CI results (required)": "Aggregate failure from the explicitly reviewed jobs above.",
+    "CI required": "Aggregate failure from the explicitly reviewed jobs above. Exception applies only to this pinned candidate run."
+  }
 }
