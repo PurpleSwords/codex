@@ -20,7 +20,12 @@ def classify(paths):
             continue
         if path == "codex-rs/models-manager/models.json" or (
             path.startswith("codex-rs/tui/src/chatwidget/snapshots/")
-            and path.endswith("__model_selection_popup.snap")
+            and path.endswith(
+                (
+                    "__model_selection_popup.snap",
+                    "__model_selection_popup_bundled_models.snap",
+                )
+            )
         ):
             catalog = True
             continue

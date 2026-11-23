@@ -19,6 +19,7 @@ class RoutingTests(unittest.TestCase):
             [
                 "codex-rs/models-manager/models.json",
                 "codex-rs/tui/src/chatwidget/snapshots/codex_tui__chatwidget__tests__model_selection_popup.snap",
+                "codex-rs/tui/src/chatwidget/snapshots/codex_tui__chatwidget__tests__model_selection_popup_bundled_models.snap",
             ]
         )
         self.assertEqual(plan["cargo_profile"], "model-catalog-extensions")

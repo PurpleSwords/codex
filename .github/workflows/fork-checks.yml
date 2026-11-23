@@ -202,7 +202,7 @@ jobs:
         run: just test --locked -p codex-models-manager -p codex-model-provider --lib --retries=0
       - name: Test model picker snapshots
         if: ${{ !cancelled() && inputs.profile == 'model-catalog-extensions' }}
-        run: just test --locked -p codex-tui --lib -E 'test(model_selection_popup_snapshot) | test(model_picker_)' --retries=0
+        run: just test --locked -p codex-tui --lib -E 'test(model_selection_popup) | test(model_picker_)' --retries=0
       - name: Check for a clean worktree
         if: always() && !cancelled()
         uses: ./.github/actions/check-clean-worktree
