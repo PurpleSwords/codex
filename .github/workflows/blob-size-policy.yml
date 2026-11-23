@@ -10,8 +10,9 @@ jobs:
     permissions:
       contents: read
     steps:
-      # The fork checks repository blobs directly; Fence's optional host audit
-      # cannot start on this runner and prevents even checkout from running.
+      - uses: openai/fence@e6b39c80c51cb2b2a39448ddeff74b3b886c0a63 # pin@v0.10.0
+        with:
+          mode: audit
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0

@@ -135,20 +135,6 @@ jobs:
         run: python3 -m py_compile tools/argument-comment-lint/wrapper_common.py tools/argument-comment-lint/run.py tools/argument-comment-lint/run-prebuilt-linter.py tools/argument-comment-lint/test_wrapper_common.py
       - name: Test Python wrapper helpers
         run: python3 -m unittest discover -s tools/argument-comment-lint -p 'test_*.py'
-      - name: Provide pinned Clippy source for Dylint 5
-        shell: bash
-        run: |
-          set -euo pipefail
-          # Dylint 5 hard-codes master, which Clippy renamed to main. Keep the
-          # existing compiler/lint versions and provide that alias locally at
-          # the same revision used by the lint package, with its full history.
-          clippy_mirror="$RUNNER_TEMP/dylint-clippy.git"
-          git clone --bare https://github.com/rust-lang/rust-clippy "$clippy_mirror"
-          git -C "$clippy_mirror" update-ref refs/heads/master 20ce69b9a63bcd2756cd906fe0964d1e901e042a
-          git -C "$clippy_mirror" symbolic-ref HEAD refs/heads/master
-          clippy_config="$RUNNER_TEMP/dylint-gitconfig"
-          git config --file "$clippy_config" url."$clippy_mirror".insteadOf https://github.com/rust-lang/rust-clippy
-          echo "GIT_CONFIG_GLOBAL=$clippy_config" >> "$GITHUB_ENV"
       - name: Test argument comment lint package
         working-directory: tools/argument-comment-lint
         run: cargo test

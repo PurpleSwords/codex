@@ -10,7 +10,7 @@
     "Blob size policy / Blob size policy": "User authorized release-specific deferral: optional Fence audit failed before checkout; not a binary build failure.",
     "rust-ci / Argument comment lint package": "User authorized deferral of legacy Dylint tooling failure caused by Clippy renaming master to main.",
     "rust-ci / Cargo build and integration tests / Linux build and baseline tests": "Reviewed pinned run: 4092 TUI tests passed; only bundled model-menu snapshot differed after adding models. Snapshot correction is in the release repair branch. Six release builds and install checks passed separately.",
-    "cargo-deny / cargo-deny": "User authorized shipping the existing dependency graph for this model-catalog release. Dependency manifests and lockfile are unchanged from fork.3 source; existing audit findings remain tracked in FORK4_RELEASE_BLOCKERS.md and are not claimed fixed.",
+    "cargo-deny / cargo-deny": "User authorized shipping the existing dependency graph for this model-catalog release. Dependency manifests and lockfile are unchanged from fork.3 source; existing audit findings remain in the pinned CI run and are not claimed fixed.",
     "rust-ci / CI results (required)": "Aggregate failure from the explicitly reviewed jobs above.",
     "CI required": "Aggregate failure from the explicitly reviewed jobs above. Exception applies only to this pinned candidate run."
   }
