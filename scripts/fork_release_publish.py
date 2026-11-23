@@ -155,7 +155,7 @@ def publish_packages(directory, version, previous_latest, *, execute):
         subprocess.run(command, check=True, timeout=300)
         if execute:
             # npm can return success while the published version is still processing.
-            visibility_deadline = time.monotonic() + 10 * 60
+            visibility_deadline = time.monotonic() + 30 * 60
             while True:
                 observed = registry_metadata()
                 if existing_matches(
@@ -168,7 +168,7 @@ def publish_packages(directory, version, previous_latest, *, execute):
                     raise ValueError(
                         f"Published version not visible yet; inspect before retrying: {item}"
                     )
-                time.sleep(5)
+                time.sleep(15)
 
 
 def main():
